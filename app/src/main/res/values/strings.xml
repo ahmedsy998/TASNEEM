@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">تسنيم</string>
+    <string name="app_subtitle">استوديو صناعة الفيديو القرآني</string>
+    <string name="appearance_button">المظهر</string>
+    <string name="create_quran_video">أنشئ فيديو قرآني</string>
+    <string name="live_preview_title">البث الحي</string>
+    <string name="choose_image_from_phone">اختيار صورة من الهاتف</string>
+    <string name="choose_video_from_phone">اختيار فيديو من الهاتف</string>
+    <string name="export_mp4_button">توليد وحفظ الفيديو (MP4)</string>
+    <string name="watermark_default_text">تسنيم</string>
+</resources>

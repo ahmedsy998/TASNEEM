@@ -1,0 +1,6 @@
+{
+  "name": "تسنيم",
+  "description": "استوديو تسنيم الاحترافي لإنشاء الفيديوهات القرآنية بجودة عالية مع تلاوات نخبة القراء وتخصيص الخطوط والخلفيات والتصدير بصيغة MP4",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer Islamic 8-pointed star (Rub el Hizb) in Primary Premium Orange #E8872F -->
+    <path
+        android:fillColor="#FFE8872F"
+        android:pathData="M54,22 L63.4,31.4 L76.6,31.4 L76.6,44.6 L86,54 L76.6,63.4 L76.6,76.6 L63.4,76.6 L54,86 L44.6,76.6 L31.4,76.6 L31.4,63.4 L22,54 L31.4,44.6 L31.4,31.4 L44.6,31.4 Z" />
+    <!-- Inner dark recess -->
+    <path
+        android:fillColor="#FF1D2227"
+        android:pathData="M54,28 L61.6,35.6 L72.4,35.6 L72.4,46.4 L80,54 L72.4,61.6 L72.4,72.4 L61.6,72.4 L54,80 L46.4,72.4 L35.6,72.4 L35.6,61.6 L28,54 L35.6,46.4 L35.6,35.6 L46.4,35.6 Z" />
+    <!-- Open Quran & Play Symbol Motif in Soft Ivory #F5F1EA and Premium Orange #E8872F -->
+    <path
+        android:fillColor="#FFF5F1EA"
+        android:pathData="M38,44 C43,44 48,46 53,49 L53,66 C48,63 43,61 38,61 Z M70,44 C65,44 60,46 55,49 L55,66 C60,63 65,61 70,61 Z" />
+    <path
+        android:fillColor="#FFE8872F"
+        android:pathData="M50,36 L59,41 L50,46 Z" />
+</vector>
