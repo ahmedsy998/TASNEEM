@@ -22,15 +22,35 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: 3. Configure Android SDK
-        uses: android-actions/setup-android@v3
+      - name: 3. Pre-accept Android SDK Licenses
+        run: |
+          set +o pipefail
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          mkdir -p "$SDK_ROOT/licenses"
+          printf "\n8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n859f317696f67ef3d7f30a50a5560e7834b43903\n" > "$SDK_ROOT/licenses/android-sdk-license"
+          printf "\n84831b9409646a918e30573bab4c9c91346d8abd\n504667f4c0de7af1a06de9f4b1727b84351f2910\n" > "$SDK_ROOT/licenses/android-sdk-preview-license"
+          printf "\n859f317696f67ef3d7f30a50a5560e7834b43903\n" > "$SDK_ROOT/licenses/android-sdk-arm-dbt-license"
+          printf "\n33b6a2b64607f11b759f320ef9dff4ae5c47d97a\n" > "$SDK_ROOT/licenses/google-gdk-license"
+          printf "\nd975f751698a77b662f1254ddbeed3901e976f5a\n" > "$SDK_ROOT/licenses/intel-android-extra-license"
+          printf "\ne9acab5b5fbb560a72cfaecce8946896ff6aab9d\n" > "$SDK_ROOT/licenses/intel-android-sysimage-license"
+          printf "\ne9acab5b5fbb560a72cfaecce8946896ff6aab9d\n" > "$SDK_ROOT/licenses/mips-android-sysimage-license"
 
-      - name: 4. Configure Gradle
+      - name: 4. Configure Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          accept-android-sdk-licenses: true
+
+      - name: 5. Accept Android SDK Licenses Non-Interactively
+        run: |
+          set +o pipefail
+          yes | sdkmanager --licenses > /dev/null || true
+
+      - name: 6. Configure Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
 
-      - name: 5. Ensure Debug Keystore Exists
+      - name: 7. Ensure Debug Keystore Exists
         run: |
           if [ ! -f debug.keystore ]; then
             keytool -genkey -v -keystore debug.keystore \
@@ -40,17 +60,17 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      - name: 6. Build Android Project & Generate Debug APK
+      - name: 8. Build Android Project & Generate Debug APK
         run: gradle assembleDebug --stacktrace
 
-      - name: 7. Upload Tasneem Debug APK Artifact
+      - name: 9. Upload Tasneem Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: tasneem-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-      - name: 8. Check Release Signing Secrets Availability
+      - name: 10. Check Release Signing Secrets Availability
         id: check_signing_secrets
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -65,7 +85,7 @@ jobs:
             echo "Release signing secrets not configured. Skipping optional signed release APK build."
           fi
 
-      - name: 9. Build Optional Signed Release APK
+      - name: 11. Build Optional Signed Release APK
         if: steps.check_signing_secrets.outputs.configured == 'true'
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -77,7 +97,7 @@ jobs:
           gradle assembleRelease --stacktrace
           rm -f "$KEYSTORE_PATH"
 
-      - name: 10. Upload Tasneem Signed Release APK Artifact
+      - name: 12. Upload Tasneem Signed Release APK Artifact
         if: steps.check_signing_secrets.outputs.configured == 'true'
         uses: actions/upload-artifact@v4
         with:
