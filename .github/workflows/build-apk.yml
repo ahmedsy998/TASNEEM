@@ -50,18 +50,35 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-      - name: 8. Optional Signed Release APK (When Secrets Configured)
-        if: ${{ secrets.KEYSTORE_BASE64 != '' && secrets.STORE_PASSWORD != '' && secrets.KEY_PASSWORD != '' }}
+      - name: 8. Check Release Signing Secrets Availability
+        id: check_signing_secrets
         env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_PASSWORD" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "Release signing secrets detected. Proceeding with signed release APK build."
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "Release signing secrets not configured. Skipping optional signed release APK build."
+          fi
+
+      - name: 9. Build Optional Signed Release APK
+        if: steps.check_signing_secrets.outputs.configured == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PATH: ${{ github.workspace }}/release-upload-key.jks
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > "${KEYSTORE_PATH}"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
           gradle assembleRelease --stacktrace
+          rm -f "$KEYSTORE_PATH"
 
-      - name: 9. Upload Tasneem Signed Release APK Artifact
-        if: ${{ secrets.KEYSTORE_BASE64 != '' && secrets.STORE_PASSWORD != '' && secrets.KEY_PASSWORD != '' }}
+      - name: 10. Upload Tasneem Signed Release APK Artifact
+        if: steps.check_signing_secrets.outputs.configured == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: tasneem-release-apk
