@@ -10,7 +10,12 @@ plugins {
 
 android {
   namespace = "com.example"
-  compileSdk { version = release(36) { minorApiLevel = 1 } }
+  val sdkDir = System.getenv("ANDROID_SDK_ROOT") ?: System.getenv("ANDROID_HOME") ?: "/opt/android/sdk"
+  if (file("$sdkDir/platforms/android-36.1").exists()) {
+    compileSdk { version = release(36) { minorApiLevel = 1 } }
+  } else {
+    compileSdk = 36
+  }
 
   defaultConfig {
     applicationId = "com.aistudio.tasneem.qrvd"

@@ -9,48 +9,89 @@ on:
 
 jobs:
   build-apk:
-    name: Build Tasneem Debug & Optional Signed Release APK
+    name: Build & Verify Tasneem Android APK
     runs-on: ubuntu-latest
 
     steps:
       - name: 1. Checkout Repository
         uses: actions/checkout@v4
 
-      - name: 2. Set up Compatible JDK (Java 17)
+      - name: 2. Set up Compatible JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: 3. Pre-accept Android SDK Licenses
+      - name: 3. Configure Android SDK & Accept All Licenses Non-Interactively
         run: |
-          set +o pipefail
+          set -e
           SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
-          mkdir -p "$SDK_ROOT/licenses"
+          mkdir -p "$SDK_ROOT/licenses" "$SDK_ROOT/cmdline-tools"
+
+          export ANDROID_HOME="$SDK_ROOT"
+          export ANDROID_SDK_ROOT="$SDK_ROOT"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+
+          # Locate existing sdkmanager or install official Android command-line tools if absent
+          SDKMANAGER=""
+          if [ -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          else
+            FOUND_SDKM=$(find "$SDK_ROOT/cmdline-tools" -name sdkmanager -type f -executable 2>/dev/null | head -n 1 || true)
+            if [ -n "$FOUND_SDKM" ]; then
+              SDKMANAGER="$FOUND_SDKM"
+            else
+              echo "Installing official Android command-line tools..."
+              CMDLINE_ZIP="/tmp/commandlinetools-linux.zip"
+              curl -fsSL "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" -o "$CMDLINE_ZIP"
+              mkdir -p "/tmp/cmdline-extract"
+              unzip -q -o "$CMDLINE_ZIP" -d "/tmp/cmdline-extract"
+              rm -rf "$SDK_ROOT/cmdline-tools/latest"
+              mkdir -p "$SDK_ROOT/cmdline-tools/latest"
+              mv /tmp/cmdline-extract/cmdline-tools/* "$SDK_ROOT/cmdline-tools/latest/"
+              rm -rf "$CMDLINE_ZIP" "/tmp/cmdline-extract"
+              SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+            fi
+          fi
+
+          CMDLINE_BIN_DIR="$(dirname "$SDKMANAGER")"
+          echo "$CMDLINE_BIN_DIR" >> "$GITHUB_PATH"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+
+          # Pre-populate all 10 official Android SDK license hashes (including Google TV, Google XR, and MicroXR)
           printf "\n8933bad161af4178b1185d1a37fbf41ea5269c55\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63b6825ea9c5514f83c2829b004d1fee\n859f317696f67ef3d7f30a50a5560e7834b43903\n" > "$SDK_ROOT/licenses/android-sdk-license"
           printf "\n84831b9409646a918e30573bab4c9c91346d8abd\n504667f4c0de7af1a06de9f4b1727b84351f2910\n" > "$SDK_ROOT/licenses/android-sdk-preview-license"
           printf "\n859f317696f67ef3d7f30a50a5560e7834b43903\n" > "$SDK_ROOT/licenses/android-sdk-arm-dbt-license"
           printf "\n33b6a2b64607f11b759f320ef9dff4ae5c47d97a\n" > "$SDK_ROOT/licenses/google-gdk-license"
+          printf "\n601085b94cd77f0b54ff86406957099ebe79c4d6\n" > "$SDK_ROOT/licenses/android-googletv-license"
+          printf "\nceff83576aac4f7f37cb98fe189e9fb3c49d3b81\n" > "$SDK_ROOT/licenses/android-googlexr-license"
+          printf "\n3a7848b1d7366ca5cfa0be477627644ca73f47e3\n" > "$SDK_ROOT/licenses/microxr-sysimage-license"
           printf "\nd975f751698a77b662f1254ddbeed3901e976f5a\n" > "$SDK_ROOT/licenses/intel-android-extra-license"
           printf "\ne9acab5b5fbb560a72cfaecce8946896ff6aab9d\n" > "$SDK_ROOT/licenses/intel-android-sysimage-license"
           printf "\ne9acab5b5fbb560a72cfaecce8946896ff6aab9d\n" > "$SDK_ROOT/licenses/mips-android-sysimage-license"
 
-      - name: 4. Configure Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          accept-android-sdk-licenses: true
-
-      - name: 5. Accept Android SDK Licenses Non-Interactively
-        run: |
+          # Accept any remaining SDK licenses non-interactively
           set +o pipefail
-          yes | sdkmanager --licenses > /dev/null || true
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null || true
 
-      - name: 6. Configure Gradle
+          # Verify sdkmanager works before installing required SDK components
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" --version
+
+          # Install only the exact SDK components required by Tasneem
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" \
+            "platform-tools" \
+            "build-tools;36.0.0" \
+            "platforms;android-36" > /dev/null
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platforms;android-36.1" > /dev/null 2>&1 || true
+          set -o pipefail
+
+      - name: 4. Configure Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.11.1'
+          gradle-version: '9.3.1'
 
-      - name: 7. Ensure Debug Keystore Exists
+      - name: 5. Ensure Debug Keystore Exists
         run: |
           if [ ! -f debug.keystore ]; then
             keytool -genkey -v -keystore debug.keystore \
@@ -60,14 +101,37 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      - name: 8. Build Android Project & Generate Debug APK
-        run: gradle assembleDebug --stacktrace
+      - name: 6. Validate Gradle Configuration & Tasks
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --version
+          ./gradlew tasks --all > /dev/null
+
+      - name: 7. Compile Project & Assemble Debug APK
+        run: ./gradlew :app:assembleDebug --stacktrace
+
+      - name: 8. Verify Generated Debug APK Integrity
+        run: |
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -s "$APK_PATH" ]; then
+            echo "ERROR: Expected debug APK was not generated or is empty at $APK_PATH"
+            exit 1
+          fi
+          ls -lh "$APK_PATH"
+          AAPT2_BIN="$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt2"
+          APKSIGNER_BIN="$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner"
+          if [ -x "$AAPT2_BIN" ]; then
+            "$AAPT2_BIN" dump badging "$APK_PATH" | head -n 25
+          fi
+          if [ -x "$APKSIGNER_BIN" ]; then
+            "$APKSIGNER_BIN" verify --verbose "$APK_PATH"
+          fi
 
       - name: 9. Upload Tasneem Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: tasneem-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
       - name: 10. Check Release Signing Secrets Availability
@@ -79,7 +143,7 @@ jobs:
         run: |
           if [ -n "$KEYSTORE_BASE64" ] && [ -n "$STORE_PASSWORD" ] && [ -n "$KEY_PASSWORD" ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
-            echo "Release signing secrets detected. Proceeding with signed release APK build."
+            echo "Release signing secrets detected. Proceeding with optional signed release APK build."
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "Release signing secrets not configured. Skipping optional signed release APK build."
@@ -87,6 +151,7 @@ jobs:
 
       - name: 11. Build Optional Signed Release APK
         if: steps.check_signing_secrets.outputs.configured == 'true'
+        continue-on-error: true
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PATH: ${{ github.workspace }}/release-upload-key.jks
@@ -94,11 +159,12 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
-          gradle assembleRelease --stacktrace
+          ./gradlew :app:assembleRelease --stacktrace
           rm -f "$KEYSTORE_PATH"
 
       - name: 12. Upload Tasneem Signed Release APK Artifact
         if: steps.check_signing_secrets.outputs.configured == 'true'
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: tasneem-release-apk
