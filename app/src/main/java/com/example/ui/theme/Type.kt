@@ -8,10 +8,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.example.R
 
-val CairoFontFamily = FontFamily(
-    Font(R.font.cairo, FontWeight.Normal),
-    Font(R.font.cairo, FontWeight.Medium),
-    Font(R.font.cairo, FontWeight.Bold)
+val KfgqpcUthmanicFontFamily = FontFamily(
+    Font(R.font.kfgqpc_uthmanic, FontWeight.Normal),
+    Font(R.font.kfgqpc_uthmanic, FontWeight.Bold)
+)
+
+val AmiriQuranFontFamily = FontFamily(
+    Font(R.font.amiri_quran, FontWeight.Normal),
+    Font(R.font.amiri_quran, FontWeight.Bold)
 )
 
 val AmiriFontFamily = FontFamily(
@@ -19,8 +23,9 @@ val AmiriFontFamily = FontFamily(
     Font(R.font.amiri, FontWeight.Bold)
 )
 
-val AmiriQuranFontFamily = FontFamily(
-    Font(R.font.amiri_quran, FontWeight.Normal)
+val ScheherazadeNewFontFamily = FontFamily(
+    Font(R.font.scheherazade_new, FontWeight.Normal),
+    Font(R.font.scheherazade_new, FontWeight.Bold)
 )
 
 val NotoNaskhArabicFontFamily = FontFamily(
@@ -28,18 +33,20 @@ val NotoNaskhArabicFontFamily = FontFamily(
     Font(R.font.noto_naskh_arabic, FontWeight.Bold)
 )
 
+val LateefFontFamily = FontFamily(
+    Font(R.font.lateef, FontWeight.Normal),
+    Font(R.font.lateef, FontWeight.Bold)
+)
+
 val NotoSansArabicFontFamily = FontFamily(
     Font(R.font.noto_sans_arabic, FontWeight.Normal),
     Font(R.font.noto_sans_arabic, FontWeight.Bold)
 )
 
-val ScheherazadeNewFontFamily = FontFamily(
-    Font(R.font.scheherazade_new, FontWeight.Normal),
-    Font(R.font.scheherazade_new, FontWeight.Bold)
-)
-
-val LateefFontFamily = FontFamily(
-    Font(R.font.lateef, FontWeight.Normal)
+val CairoFontFamily = FontFamily(
+    Font(R.font.cairo, FontWeight.Normal),
+    Font(R.font.cairo, FontWeight.Medium),
+    Font(R.font.cairo, FontWeight.Bold)
 )
 
 val IbmPlexSansArabicFontFamily = FontFamily(

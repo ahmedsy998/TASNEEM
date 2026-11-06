@@ -1,7 +1,9 @@
 package com.example.ui.components
 
+import android.graphics.RectF
 import android.net.Uri
 import android.view.TextureView
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,7 +22,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -48,56 +49,50 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
-import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import coil.compose.AsyncImage
 import com.example.data.QuranDataRepository
+import com.example.media.DraggableCanvasElement
+import com.example.media.FrameElementHitBoxes
 import com.example.media.PlaybackSyncState
+import com.example.media.VideoFrameCanvasRenderer
 import com.example.model.AudioDownloadState
 import com.example.model.MediaCropMode
 import com.example.model.PhoneMediaBackground
 import com.example.model.QuranTextStyleConfig
 import com.example.model.QuranVerse
+import com.example.model.RecitationHeaderConfig
+import com.example.model.VerseTransitionConfig
 import com.example.model.VideoAspectRatio
 import com.example.model.WatermarkConfig
-import com.example.ui.theme.CairoFontFamily
 import com.example.ui.theme.LocalTasneemColors
 import com.example.ui.theme.TasneemDeepCharcoal
 import com.example.ui.theme.TasneemOrange
-import com.example.ui.theme.TasneemSilverGray
-import com.example.ui.theme.TasneemSoftIvory
 import java.util.Locale
-import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
- * Persistent Live Preview Panel ("البث الحي") - Sections 12 & 13.
+ * Persistent Live Preview Panel ("البث الحي") - Requirements 04, 06, 07, 08, 09, 10, 12.
  * Remains fixed and visible at the top of the Video Studio while the user scrolls through settings below it.
- * Updates immediately on every setting change and supports direct drag positioning of the Tasneem watermark
- * and Quranic text block.
+ * Uses the exact same VideoFrameCanvasRenderer as Mp4VideoRenderEngine so the Live Preview and exported MP4
+ * match 100% in aspect ratio, fonts, Tashkeel colors, single-line phrases, transitions, headers, and signature.
  */
 @Composable
 fun PersistentLivePreviewPanel(
@@ -108,6 +103,8 @@ fun PersistentLivePreviewPanel(
     audioDownloadState: AudioDownloadState,
     phoneMedia: PhoneMediaBackground,
     textStyle: QuranTextStyleConfig,
+    recitationHeader: RecitationHeaderConfig = RecitationHeaderConfig(),
+    verseTransition: VerseTransitionConfig = VerseTransitionConfig(),
     watermark: WatermarkConfig,
     aspectRatio: VideoAspectRatio,
     isFullscreen: Boolean,
@@ -115,6 +112,9 @@ fun PersistentLivePreviewPanel(
     onSeekToMs: (Long) -> Unit,
     onUpdateWatermarkPosition: (Float, Float) -> Unit,
     onUpdateTextPosition: (Float, Float) -> Unit,
+    onUpdateSurahHeaderPosition: (Float, Float) -> Unit = { _, _ -> },
+    onUpdateVerseNumberPosition: (Float, Float) -> Unit = { _, _ -> },
+    onUpdateReciterHeaderPosition: (Float, Float) -> Unit = { _, _ -> },
     onToggleFullscreen: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -122,6 +122,20 @@ fun PersistentLivePreviewPanel(
     val activeVerse = selectedVerses.find { it.verseNumber == playbackSyncState.activeVerseNumber }
         ?: selectedVerses.firstOrNull()
         ?: QuranVerse(112, 1, "قُلْ هُوَ ٱللَّهُ أَحَدٌ")
+
+    val activeSegment = remember(audioDownloadState, activeVerse.verseNumber) {
+        (audioDownloadState as? AudioDownloadState.Ready)?.segments?.find {
+            it.verseNumber == activeVerse.verseNumber
+        }
+    }
+
+    val localVerseTimeMs = remember(playbackSyncState.overallPositionMs, playbackSyncState.currentVersePositionMs, activeSegment) {
+        if (activeSegment != null) {
+            (playbackSyncState.overallPositionMs - activeSegment.startOffsetMs).coerceAtLeast(0L)
+        } else {
+            playbackSyncState.currentVersePositionMs.coerceAtLeast(0L)
+        }
+    }
 
     Surface(
         color = colors.elevatedSurface,
@@ -172,7 +186,7 @@ fun PersistentLivePreviewPanel(
                     }
 
                     Text(
-                        text = "سورة $surahNameAr · الآية ${QuranDataRepository.toArabicDigits(activeVerse.verseNumber)}",
+                        text = "سورة $surahNameAr · الآية ${QuranDataRepository.toArabicDigits(activeVerse.verseNumber)} (${aspectRatio.id})",
                         style = MaterialTheme.typography.labelLarge,
                         color = colors.textPrimary
                     )
@@ -210,8 +224,13 @@ fun PersistentLivePreviewPanel(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Video Canvas Container
-            val previewBoxHeight = if (isFullscreen) 460.dp else 215.dp
+            // Video Canvas Container with true aspect ratio (9:16 portrait, 16:9 landscape, 1:1 square)
+            val previewBoxHeight = when {
+                isFullscreen -> 470.dp
+                aspectRatio == VideoAspectRatio.LANDSCAPE_16_9 -> 195.dp
+                aspectRatio == VideoAspectRatio.SQUARE_1_1 -> 215.dp
+                else -> 235.dp
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -221,16 +240,21 @@ fun PersistentLivePreviewPanel(
                 LivePreviewVideoFrame(
                     surahNameAr = surahNameAr,
                     activeVerse = activeVerse,
-                    activeWordIndex = playbackSyncState.activeWordIndex,
+                    activeSegment = activeSegment,
+                    localVerseTimeMs = localVerseTimeMs,
                     reciterNameAr = reciterNameAr,
                     isPlaying = playbackSyncState.isPlaying,
                     phoneMedia = phoneMedia,
                     textStyle = textStyle,
+                    recitationHeader = recitationHeader,
+                    verseTransition = verseTransition,
                     watermark = watermark,
                     aspectRatio = aspectRatio,
-                    isFullscreen = isFullscreen,
                     onUpdateWatermarkPosition = onUpdateWatermarkPosition,
-                    onUpdateTextPosition = onUpdateTextPosition
+                    onUpdateTextPosition = onUpdateTextPosition,
+                    onUpdateSurahHeaderPosition = onUpdateSurahHeaderPosition,
+                    onUpdateVerseNumberPosition = onUpdateVerseNumberPosition,
+                    onUpdateReciterHeaderPosition = onUpdateReciterHeaderPosition
                 )
             }
 
@@ -331,35 +355,54 @@ fun PersistentLivePreviewPanel(
 private fun LivePreviewVideoFrame(
     surahNameAr: String,
     activeVerse: QuranVerse,
-    activeWordIndex: Int?,
+    activeSegment: com.example.model.VerseAudioSegment?,
+    localVerseTimeMs: Long,
     reciterNameAr: String,
     isPlaying: Boolean,
     phoneMedia: PhoneMediaBackground,
     textStyle: QuranTextStyleConfig,
+    recitationHeader: RecitationHeaderConfig,
+    verseTransition: VerseTransitionConfig,
     watermark: WatermarkConfig,
     aspectRatio: VideoAspectRatio,
-    isFullscreen: Boolean,
     onUpdateWatermarkPosition: (Float, Float) -> Unit,
-    onUpdateTextPosition: (Float, Float) -> Unit
+    onUpdateTextPosition: (Float, Float) -> Unit,
+    onUpdateSurahHeaderPosition: (Float, Float) -> Unit,
+    onUpdateVerseNumberPosition: (Float, Float) -> Unit,
+    onUpdateReciterHeaderPosition: (Float, Float) -> Unit
 ) {
+    val context = LocalContext.current
     val density = LocalDensity.current
+    val frameRenderer = remember(context) { VideoFrameCanvasRenderer(context) }
+
     val currentWatermark by rememberUpdatedState(watermark)
     val currentTextStyle by rememberUpdatedState(textStyle)
+    val currentHeader by rememberUpdatedState(recitationHeader)
 
-    BoxWithConstraints(
-        modifier = Modifier
+    var lastHitBoxes by remember { mutableStateOf(FrameElementHitBoxes()) }
+    var activeDragElement by remember { mutableStateOf<DraggableCanvasElement?>(null) }
+
+    val aspectModifier = if (aspectRatio == VideoAspectRatio.LANDSCAPE_16_9) {
+        Modifier
+            .fillMaxWidth(0.95f)
+            .aspectRatio(aspectRatio.ratioValue, matchHeightConstraintsFirst = false)
+    } else {
+        Modifier
             .fillMaxHeight()
             .aspectRatio(aspectRatio.ratioValue, matchHeightConstraintsFirst = true)
+    }
+
+    BoxWithConstraints(
+        modifier = aspectModifier
             .clip(RoundedCornerShape(16.dp))
             .background(TasneemDeepCharcoal)
-            .border(1.5.dp, TasneemOrange.copy(alpha = 0.5f), RoundedCornerShape(16.dp)),
+            .border(1.5.dp, TasneemOrange.copy(alpha = 0.55f), RoundedCornerShape(16.dp)),
         contentAlignment = Alignment.Center
     ) {
         val frameWidthPx = with(density) { maxWidth.toPx().coerceAtLeast(1f) }
         val frameHeightPx = with(density) { maxHeight.toPx().coerceAtLeast(1f) }
-        val scaleFactor = (minOf(frameWidthPx, frameHeightPx) / 900f).coerceIn(0.32f, 1.15f)
 
-        // 1. Phone Background Image or Video
+        // 1. Background Media Layer (Phone / Curated Image or Video)
         if (!phoneMedia.uriString.isNullOrBlank()) {
             val contentScale = when (phoneMedia.cropMode) {
                 MediaCropMode.CENTER_CROP, MediaCropMode.CUSTOM_PAN_ZOOM -> ContentScale.Crop
@@ -389,7 +432,7 @@ private fun LivePreviewVideoFrame(
 
                 AsyncImage(
                     model = Uri.parse(phoneMedia.uriString),
-                    contentDescription = "خلفية الفيديو المختارة من الهاتف",
+                    contentDescription = "خلفية الفيديو المختارة",
                     contentScale = contentScale,
                     colorFilter = ColorFilter.colorMatrix(colorMatrix),
                     modifier = Modifier
@@ -403,7 +446,6 @@ private fun LivePreviewVideoFrame(
                 )
             }
         } else {
-            // Subtle Islamic gradient canvas when user hasn't picked a phone image/video yet
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -419,212 +461,110 @@ private fun LivePreviewVideoFrame(
             )
         }
 
-        // 2. Dimming & Vignette Overlay
-        Box(
+        // 2. Unified Canvas Overlay (100% shared with Mp4VideoRenderEngine)
+        // Renders dimming, single-line Quranic phrase, independent Tashkeel colors,
+        // 7 transition animations, 3 independent header elements, and Personal Signature + Social Icons.
+        Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFF12161A).copy(alpha = phoneMedia.dimLevel.coerceIn(0f, 0.92f)))
-        )
-
-        // 3. Draggable Synchronized Quranic Verse Block
-        val textCenterOffsetX = ((textStyle.normalizedX - 0.5f) * frameWidthPx).roundToInt()
-        val textCenterOffsetY = ((textStyle.normalizedY - 0.5f) * frameHeightPx).roundToInt()
-
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
-                .offset { IntOffset(textCenterOffsetX, textCenterOffsetY) }
-                .fillMaxWidth(0.88f)
                 .pointerInput(frameWidthPx, frameHeightPx) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        val newX = (currentTextStyle.normalizedX + dragAmount.x / frameWidthPx)
-                            .coerceIn(0.18f, 0.82f)
-                        val newY = (currentTextStyle.normalizedY + dragAmount.y / frameHeightPx)
-                            .coerceIn(0.22f, 0.78f)
-                        onUpdateTextPosition(newX, newY)
-                    }
+                    detectDragGestures(
+                        onDragStart = { startOffset ->
+                            val x = startOffset.x
+                            val y = startOffset.y
+                            val pad = 32f
+                            activeDragElement = when {
+                                expandRect(lastHitBoxes.signatureBounds, pad).contains(x, y) ->
+                                    DraggableCanvasElement.SIGNATURE_WATERMARK
+                                expandRect(lastHitBoxes.surahNameBounds, pad).contains(x, y) ->
+                                    DraggableCanvasElement.SURAH_NAME
+                                expandRect(lastHitBoxes.verseNumberBounds, pad).contains(x, y) ->
+                                    DraggableCanvasElement.VERSE_NUMBER
+                                expandRect(lastHitBoxes.reciterNameBounds, pad).contains(x, y) ->
+                                    DraggableCanvasElement.RECITER_NAME
+                                else -> DraggableCanvasElement.QURAN_VERSE
+                            }
+                        },
+                        onDragEnd = { activeDragElement = null },
+                        onDragCancel = { activeDragElement = null },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            val dxNorm = dragAmount.x / frameWidthPx
+                            val dyNorm = dragAmount.y / frameHeightPx
+                            when (activeDragElement ?: DraggableCanvasElement.QURAN_VERSE) {
+                                DraggableCanvasElement.SIGNATURE_WATERMARK -> {
+                                    onUpdateWatermarkPosition(
+                                        (currentWatermark.normalizedX + dxNorm).coerceIn(0.08f, 0.92f),
+                                        (currentWatermark.normalizedY + dyNorm).coerceIn(0.06f, 0.94f)
+                                    )
+                                }
+                                DraggableCanvasElement.SURAH_NAME -> {
+                                    onUpdateSurahHeaderPosition(
+                                        (currentHeader.surahName.normalizedX + dxNorm).coerceIn(0.08f, 0.92f),
+                                        (currentHeader.surahName.normalizedY + dyNorm).coerceIn(0.06f, 0.92f)
+                                    )
+                                }
+                                DraggableCanvasElement.VERSE_NUMBER -> {
+                                    onUpdateVerseNumberPosition(
+                                        (currentHeader.verseNumber.normalizedX + dxNorm).coerceIn(0.08f, 0.92f),
+                                        (currentHeader.verseNumber.normalizedY + dyNorm).coerceIn(0.06f, 0.92f)
+                                    )
+                                }
+                                DraggableCanvasElement.RECITER_NAME -> {
+                                    onUpdateReciterHeaderPosition(
+                                        (currentHeader.reciterName.normalizedX + dxNorm).coerceIn(0.08f, 0.92f),
+                                        (currentHeader.reciterName.normalizedY + dyNorm).coerceIn(0.06f, 0.92f)
+                                    )
+                                }
+                                DraggableCanvasElement.QURAN_VERSE -> {
+                                    onUpdateTextPosition(
+                                        (currentTextStyle.normalizedX + dxNorm).coerceIn(0.12f, 0.88f),
+                                        (currentTextStyle.normalizedY + dyNorm).coerceIn(0.14f, 0.86f)
+                                    )
+                                }
+                            }
+                        }
+                    )
                 }
         ) {
-            if (textStyle.showSurahHeader) {
-                Text(
-                    text = "سُورَةُ $surahNameAr",
-                    fontFamily = textStyle.font.composeFontFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = (18f * scaleFactor + 8f).sp,
-                    color = TasneemSoftIvory,
-                    textAlign = TextAlign.Center
+            drawIntoCanvas { composeCanvas ->
+                lastHitBoxes = frameRenderer.renderFrame(
+                    canvas = composeCanvas.nativeCanvas,
+                    frameWidth = size.width.toInt().coerceAtLeast(1),
+                    frameHeight = size.height.toInt().coerceAtLeast(1),
+                    backgroundBitmap = null,
+                    mediaConfig = phoneMedia,
+                    surahNameAr = surahNameAr,
+                    activeVerse = activeVerse,
+                    activeSegment = activeSegment,
+                    localVerseTimeMs = localVerseTimeMs,
+                    reciterNameAr = reciterNameAr,
+                    textConfig = textStyle,
+                    headerConfig = recitationHeader,
+                    transitionConfig = verseTransition,
+                    watermarkConfig = watermark,
+                    drawBackground = false
                 )
-                Text(
-                    text = "الآية ${QuranDataRepository.toArabicDigits(activeVerse.verseNumber)}",
-                    fontFamily = CairoFontFamily,
-                    fontSize = (11f * scaleFactor + 6f).sp,
-                    color = TasneemOrange,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(6.dp))
             }
+        }
 
-            // Highlight active word if verified word-level timestamps exist
-            val words = remember(activeVerse.uthmaniText) {
-                activeVerse.uthmaniText.trim().split(Regex("\\s+"))
-            }
-            val ayahSymbol = QuranDataRepository.formatAyahSymbol(activeVerse.verseNumber)
-            val baseColor = textStyle.colorOption.composeColor
-
-            val annotatedVerse = buildAnnotatedString {
-                words.forEachIndexed { idx, word ->
-                    val wordOneBased = idx + 1
-                    val isWordHighlighted = activeWordIndex != null && activeWordIndex == wordOneBased
-                    withStyle(
-                        SpanStyle(
-                            color = if (isWordHighlighted) TasneemOrange else baseColor,
-                            fontWeight = if (textStyle.isBold || isWordHighlighted) FontWeight.Bold else FontWeight.Normal
-                        )
-                    ) {
-                        append(word)
-                        append(" ")
-                    }
-                }
-                withStyle(
-                    SpanStyle(
-                        color = TasneemOrange,
-                        fontWeight = FontWeight.Bold
-                    )
-                ) {
-                    append(ayahSymbol)
-                }
-            }
-
-            val effectiveFontSize = (textStyle.fontSizeSp * scaleFactor * 1.45f).coerceIn(13f, 38f)
-            Text(
-                text = annotatedVerse,
-                fontFamily = textStyle.font.composeFontFamily,
-                fontSize = effectiveFontSize.sp,
-                lineHeight = (effectiveFontSize * textStyle.lineSpacingMultiplier).sp,
-                textAlign = textStyle.alignment.composeAlign,
-                style = TextStyle(
-                    shadow = Shadow(
-                        color = Color.Black.copy(alpha = 0.85f),
-                        blurRadius = 8f
-                    )
-                ),
-                modifier = Modifier.fillMaxWidth()
+        // Semantic test tag target for automated Robolectric tests verifying the draggable watermark
+        if (watermark.enabled) {
+            val wmOffsetX = ((watermark.normalizedX - 0.5f) * frameWidthPx).roundToInt()
+            val wmOffsetY = ((watermark.normalizedY - 0.5f) * frameHeightPx).roundToInt()
+            Box(
+                modifier = Modifier
+                    .offset { IntOffset(wmOffsetX, wmOffsetY) }
+                    .size(48.dp, 24.dp)
+                    .testTag("draggable_tasneem_watermark")
             )
-
-            if (textStyle.showTafsir && activeVerse.tafsirMuyassar.isNotBlank()) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = activeVerse.tafsirMuyassar,
-                    fontFamily = CairoFontFamily,
-                    fontSize = (effectiveFontSize * 0.58f).coerceAtLeast(10f).sp,
-                    lineHeight = (effectiveFontSize * 0.78f).sp,
-                    color = TasneemSoftIvory.copy(alpha = 0.92f),
-                    textAlign = TextAlign.Center
-                )
-            }
-
-            if (textStyle.showTranslation && activeVerse.translationSaheeh.isNotBlank()) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = activeVerse.translationSaheeh,
-                    fontFamily = CairoFontFamily,
-                    fontSize = (effectiveFontSize * textStyle.translationFontSizeScale * 0.75f).coerceAtLeast(9f).sp,
-                    lineHeight = (effectiveFontSize * 0.75f).sp,
-                    color = TasneemSilverGray,
-                    textAlign = TextAlign.Center
-                )
-            }
-
-            if (textStyle.showReciterName) {
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = reciterNameAr,
-                    fontFamily = CairoFontFamily,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = (11f * scaleFactor + 6f).sp,
-                    color = TasneemSoftIvory.copy(alpha = 0.9f),
-                    textAlign = TextAlign.Center
-                )
-            }
-        }
-
-        // 4. Draggable Tasneem Watermark ("تسنيم") with collision avoidance so it never obscures the Quranic text
-        val safeNormY = if (abs(watermark.normalizedY - textStyle.normalizedY) < 0.22f &&
-            abs(watermark.normalizedX - textStyle.normalizedX) < 0.45f
-        ) {
-            if (textStyle.normalizedY <= 0.55f) 0.90f else 0.10f
-        } else {
-            watermark.normalizedY
-        }
-
-        val wmOffsetX = ((watermark.normalizedX - 0.5f) * frameWidthPx).roundToInt()
-        val wmOffsetY = ((safeNormY - 0.5f) * frameHeightPx).roundToInt()
-        val wmAlpha = watermark.opacity.coerceIn(0.2f, 1.0f)
-        val wmFontSize = (watermark.fontSizeSp * watermark.scale * scaleFactor * 1.35f).coerceIn(9f, 24f)
-
-        Box(
-            modifier = Modifier
-                .offset { IntOffset(wmOffsetX, wmOffsetY) }
-                .pointerInput(frameWidthPx, frameHeightPx) {
-                    detectDragGestures { change, dragAmount ->
-                        change.consume()
-                        val newX = (currentWatermark.normalizedX + dragAmount.x / frameWidthPx)
-                            .coerceIn(0.10f, 0.90f)
-                        val newY = (currentWatermark.normalizedY + dragAmount.y / frameHeightPx)
-                            .coerceIn(0.07f, 0.93f)
-                        onUpdateWatermarkPosition(newX, newY)
-                    }
-                }
-                .then(
-                    if (watermark.elegantGlow) {
-                        Modifier.shadow(
-                            elevation = 8.dp,
-                            shape = RoundedCornerShape(50),
-                            ambientColor = TasneemOrange,
-                            spotColor = TasneemOrange
-                        )
-                    } else Modifier
-                )
-                .clip(RoundedCornerShape(50))
-                .background(TasneemDeepCharcoal.copy(alpha = wmAlpha * 0.55f))
-                .border(
-                    width = 0.8.dp,
-                    color = TasneemOrange.copy(alpha = wmAlpha * 0.7f),
-                    shape = RoundedCornerShape(50)
-                )
-                .padding(horizontal = 10.dp, vertical = 3.dp)
-                .testTag("draggable_tasneem_watermark")
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size((5f * watermark.scale).coerceIn(4f, 9f).dp)
-                        .clip(CircleShape)
-                        .background(TasneemOrange.copy(alpha = wmAlpha))
-                )
-                Text(
-                    text = watermark.signatureText.ifBlank { "تسنيم" },
-                    fontFamily = CairoFontFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = wmFontSize.sp,
-                    color = TasneemSoftIvory.copy(alpha = wmAlpha),
-                    style = TextStyle(
-                        shadow = if (watermark.subtleShadow || watermark.elegantGlow) {
-                            Shadow(
-                                color = if (watermark.elegantGlow) TasneemOrange.copy(alpha = wmAlpha)
-                                else Color.Black.copy(alpha = wmAlpha),
-                                blurRadius = if (watermark.elegantGlow) 10f else 5f
-                            )
-                        } else null
-                    )
-                )
-            }
         }
     }
+}
+
+private fun expandRect(rect: RectF, pad: Float): RectF {
+    if (rect.isEmpty) return RectF()
+    return RectF(rect.left - pad, rect.top - pad, rect.right + pad, rect.bottom + pad)
 }
 
 @Composable

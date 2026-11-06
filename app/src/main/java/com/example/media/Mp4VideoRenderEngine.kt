@@ -17,7 +17,9 @@ import com.example.model.ExportValidationReport
 import com.example.model.PhoneMediaBackground
 import com.example.model.QuranTextStyleConfig
 import com.example.model.QuranVerse
+import com.example.model.RecitationHeaderConfig
 import com.example.model.VerseAudioSegment
+import com.example.model.VerseTransitionConfig
 import com.example.model.VideoAspectRatio
 import com.example.model.VideoExportState
 import com.example.model.VideoResolution
@@ -55,17 +57,14 @@ class Mp4VideoRenderEngine(
         reciterNameAr: String,
         mediaBackground: PhoneMediaBackground,
         textStyleConfig: QuranTextStyleConfig,
+        headerConfig: RecitationHeaderConfig = RecitationHeaderConfig(),
+        transitionConfig: VerseTransitionConfig = VerseTransitionConfig(),
         watermarkConfig: WatermarkConfig,
         resolution: VideoResolution,
         aspectRatio: VideoAspectRatio
     ): Flow<VideoExportState> = flow {
         if (verses.isEmpty() || audioSegments.isEmpty()) {
             emit(VideoExportState.Failed("يرجى تحميل تلاوة الآيات المختارة أولاً قبل تصدير الفيديو."))
-            return@flow
-        }
-
-        if (mediaBackground.uriString.isNullOrBlank()) {
-            emit(VideoExportState.Failed("يرجى اختيار صورة أو فيديو من الهاتف لخلفية المقطع أولاً."))
             return@flow
         }
 
@@ -90,16 +89,20 @@ class Mp4VideoRenderEngine(
         )
 
         try {
-            val bgUri = Uri.parse(mediaBackground.uriString)
-            val staticBgBitmap: Bitmap? = if (!mediaBackground.isVideo) {
+            val bgUri = mediaBackground.uriString?.takeIf { it.isNotBlank() }?.let { Uri.parse(it) }
+            val staticBgBitmap: Bitmap? = if (!mediaBackground.isVideo && bgUri != null) {
                 mediaImportManager.decodeSampledBitmap(bgUri, width, height)
             } else {
                 null
             }
 
-            val videoBgRetriever: MediaMetadataRetriever? = if (mediaBackground.isVideo) {
-                MediaMetadataRetriever().apply {
-                    setDataSource(context, bgUri)
+            val videoBgRetriever: MediaMetadataRetriever? = if (mediaBackground.isVideo && bgUri != null) {
+                try {
+                    MediaMetadataRetriever().apply {
+                        setDataSource(context, bgUri)
+                    }
+                } catch (_: Exception) {
+                    null
                 }
             } else {
                 null
@@ -139,8 +142,6 @@ class Mp4VideoRenderEngine(
             var muxerStarted = false
 
             // Prepare Audio Track (Extract & Concatenate all selected verses' audio streams)
-            // First inspect the first segment's audio track format; if all segments share compatible MP3/AAC elementary streams,
-            // or transcode to AAC for universal MP4 compliance.
             val encodedAudioPackets = buildCompleteAacAudioStream(
                 segments = audioSegments,
                 totalExpectedDurationMs = totalAudioDurationMs
@@ -156,11 +157,14 @@ class Mp4VideoRenderEngine(
                 val presentationTimeUs = (frameIdx * frameIntervalUs).coerceAtMost(totalDurationUs)
                 val currentMs = presentationTimeUs / 1000L
 
-                // Determine active Quranic verse for currentMs
+                // Determine active Quranic verse & segment for currentMs
                 val activeSegmentIdx = audioSegments.indexOfFirst { seg ->
                     currentMs >= seg.startOffsetMs && currentMs <= seg.endOffsetMs
                 }.takeIf { it >= 0 } ?: (audioSegments.size - 1)
-                val activeVerse = verses.getOrElse(activeSegmentIdx) { verses.last() }
+                val activeSegment = audioSegments.getOrElse(activeSegmentIdx) { audioSegments.last() }
+                val activeVerse = verses.find { it.verseNumber == activeSegment.verseNumber }
+                    ?: verses.getOrElse(activeSegmentIdx) { verses.last() }
+                val localVerseTimeMs = (currentMs - activeSegment.startOffsetMs).coerceAtLeast(0L)
 
                 // Determine background bitmap for currentMs (looping or trimming video background if applicable)
                 val frameBgBitmap: Bitmap? = if (mediaBackground.isVideo && videoBgRetriever != null) {
@@ -211,8 +215,12 @@ class Mp4VideoRenderEngine(
                         mediaConfig = mediaBackground,
                         surahNameAr = surahNameAr,
                         activeVerse = activeVerse,
+                        activeSegment = activeSegment,
+                        localVerseTimeMs = localVerseTimeMs,
                         reciterNameAr = reciterNameAr,
                         textConfig = textStyleConfig,
+                        headerConfig = headerConfig,
+                        transitionConfig = transitionConfig,
                         watermarkConfig = watermarkConfig
                     )
                 } finally {

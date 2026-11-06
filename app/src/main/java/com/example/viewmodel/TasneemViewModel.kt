@@ -9,6 +9,7 @@ import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.AudioDownloadManager
+import com.example.data.CuratedBackgroundMediaRepository
 import com.example.data.QuranDataRepository
 import com.example.data.ReciterRepository
 import com.example.data.ThemeManager
@@ -16,17 +17,25 @@ import com.example.media.Mp4VideoRenderEngine
 import com.example.media.PhoneMediaImportManager
 import com.example.media.PlaybackSyncState
 import com.example.media.QuranSynchronizationEngine
+import com.example.media.QuranTextAndLayoutEngine
 import com.example.media.VideoFrameCanvasRenderer
 import com.example.model.ArabicQuranFont
 import com.example.model.AudioDownloadState
+import com.example.model.CuratedBackgroundMediaItem
+import com.example.model.HeaderElementConfig
 import com.example.model.MediaCropMode
 import com.example.model.PhoneMediaBackground
 import com.example.model.QuranTextAlignment
 import com.example.model.QuranTextStyleConfig
 import com.example.model.QuranVerse
+import com.example.model.RecitationHeaderConfig
 import com.example.model.ReciterInfo
+import com.example.model.SocialPlatform
 import com.example.model.SurahInfo
 import com.example.model.TextColorOption
+import com.example.model.TransitionEffectType
+import com.example.model.TransitionSpeedPreset
+import com.example.model.VerseTransitionConfig
 import com.example.model.VideoAspectRatio
 import com.example.model.VideoExportState
 import com.example.model.VideoResolution
@@ -55,6 +64,8 @@ data class StudioUiState(
     val showAppearanceModal: Boolean = false,
     val showReciterSelectorModal: Boolean = false,
     val showSurahSelectorModal: Boolean = false,
+    val showCuratedLibraryModal: Boolean = false,
+    val isDownloadingCuratedMedia: Boolean = false,
     val selectedSurah: SurahInfo = SurahInfo(112, "الإخلاص", 4, "مكية"),
     val startVerse: Int = 1,
     val endVerse: Int = 4,
@@ -66,6 +77,8 @@ data class StudioUiState(
     val phoneMedia: PhoneMediaBackground = PhoneMediaBackground(),
     val mediaImportMessageAr: String? = null,
     val textStyle: QuranTextStyleConfig = QuranTextStyleConfig(),
+    val recitationHeader: RecitationHeaderConfig = RecitationHeaderConfig(),
+    val verseTransition: VerseTransitionConfig = VerseTransitionConfig(),
     val watermark: WatermarkConfig = WatermarkConfig(),
     val aspectRatio: VideoAspectRatio = VideoAspectRatio.PORTRAIT_9_16,
     val resolution: VideoResolution = VideoResolution.RES_1080P,
@@ -78,10 +91,11 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     private val themeManager = ThemeManager(appContext)
     val quranRepository = QuranDataRepository(appContext)
     val reciterRepository = ReciterRepository()
+    val curatedMediaRepository = CuratedBackgroundMediaRepository(appContext)
     private val audioDownloadManager = AudioDownloadManager(appContext, reciterRepository)
     private val syncEngine = QuranSynchronizationEngine(appContext, viewModelScope)
-    private val mediaImportManager = PhoneMediaImportManager(appContext)
-    private val frameRenderer = VideoFrameCanvasRenderer(appContext)
+    val mediaImportManager = PhoneMediaImportManager(appContext)
+    val frameRenderer = VideoFrameCanvasRenderer(appContext)
     private val mp4RenderEngine = Mp4VideoRenderEngine(appContext, mediaImportManager, frameRenderer)
 
     val themeMode: StateFlow<AppThemeMode> = themeManager.themeModeFlow.stateIn(
@@ -110,6 +124,19 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
 
     init {
         loadVersesForCurrentSelection(autoDownloadAudio = true)
+        initializeDefaultCuratedBackgroundIfEmpty()
+    }
+
+    private fun initializeDefaultCuratedBackgroundIfEmpty() {
+        viewModelScope.launch {
+            if (_uiState.value.phoneMedia.uriString.isNullOrBlank()) {
+                val defaultItem = curatedMediaRepository.allItems.firstOrNull() ?: return@launch
+                val prepared = curatedMediaRepository.prepareAndCacheMediaItem(defaultItem)
+                if (_uiState.value.phoneMedia.uriString.isNullOrBlank()) {
+                    _uiState.update { it.copy(phoneMedia = prepared) }
+                }
+            }
+        }
     }
 
     // ==================================================
@@ -145,6 +172,10 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
         _uiState.update { it.copy(showSurahSelectorModal = visible) }
     }
 
+    fun setCuratedLibraryModalVisible(visible: Boolean) {
+        _uiState.update { it.copy(showCuratedLibraryModal = visible) }
+    }
+
     // ==================================================
     // Appearance & Theme Controls
     // ==================================================
@@ -161,7 +192,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // ==================================================
-    // Quran Surah & Verse Range Selection
+    // Quran Surah & Verse Range Selection (Requirement 01)
     // ==================================================
     fun selectSurah(surah: SurahInfo) {
         syncEngine.resetPlayback()
@@ -198,6 +229,11 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
             )
         }
         loadVersesForCurrentSelection(autoDownloadAudio = false)
+    }
+
+    fun resetVerseRange() {
+        val surah = _uiState.value.selectedSurah
+        updateVerseRange(1, minOf(surah.verseCount, 10))
     }
 
     fun loadVersesForCurrentSelection(autoDownloadAudio: Boolean = false) {
@@ -249,6 +285,10 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
             )
         }
         downloadSelectedVersesAudio()
+    }
+
+    fun resetReciterToDefault() {
+        selectReciter(defaultReciter)
     }
 
     fun toggleReciterSamplePreview(reciter: ReciterInfo) {
@@ -315,7 +355,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // ==================================================
-    // Phone Media Import (Strictly From Phone, No Preloaded Gallery)
+    // Phone Media Import & Curated Background Library (Requirement 14)
     // ==================================================
     fun onPhoneMediaPicked(uri: Uri?, isVideo: Boolean) {
         if (uri == null) return
@@ -325,7 +365,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
             onSuccess = { imported ->
                 _uiState.update {
                     it.copy(
-                        phoneMedia = imported,
+                        phoneMedia = imported.copy(curatedItemId = null),
                         mediaImportMessageAr = if (imported.isVideo) {
                             "تم استيراد الفيديو من الهاتف بنجاح: ${imported.fileName}"
                         } else {
@@ -345,6 +385,23 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
         )
     }
 
+    fun selectCuratedBackgroundItem(item: CuratedBackgroundMediaItem) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isDownloadingCuratedMedia = true) }
+            val currentDim = _uiState.value.phoneMedia.dimLevel
+            val prepared = curatedMediaRepository.prepareAndCacheMediaItem(item, currentDim)
+            _uiState.update {
+                it.copy(
+                    phoneMedia = prepared,
+                    isDownloadingCuratedMedia = false,
+                    showCuratedLibraryModal = false,
+                    mediaImportMessageAr = "تم تطبيق الخلفية المختارة من مكتبة تسنيم: ${item.titleAr}",
+                    exportState = VideoExportState.Idle
+                )
+            }
+        }
+    }
+
     fun updateMediaCropMode(mode: MediaCropMode) {
         _uiState.update { it.copy(phoneMedia = it.phoneMedia.copy(cropMode = mode)) }
     }
@@ -353,6 +410,10 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
         _uiState.update {
             it.copy(phoneMedia = it.phoneMedia.copy(scale = scale.coerceIn(0.5f, 3.0f)))
         }
+    }
+
+    fun resetMediaScale() {
+        updateMediaScale(1.0f)
     }
 
     fun updateMediaOffset(offsetX: Float, offsetY: Float) {
@@ -366,16 +427,28 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun resetMediaOffset() {
+        updateMediaOffset(0f, 0f)
+    }
+
     fun updateMediaBrightness(brightness: Float) {
         _uiState.update {
             it.copy(phoneMedia = it.phoneMedia.copy(brightness = brightness.coerceIn(-0.5f, 0.5f)))
         }
     }
 
+    fun resetMediaBrightness() {
+        updateMediaBrightness(0f)
+    }
+
     fun updateMediaDimLevel(dimLevel: Float) {
         _uiState.update {
             it.copy(phoneMedia = it.phoneMedia.copy(dimLevel = dimLevel.coerceIn(0f, 0.9f)))
         }
+    }
+
+    fun resetMediaDimLevel() {
+        updateMediaDimLevel(0.52f)
     }
 
     fun updateVideoLoopInExport(loop: Boolean) {
@@ -385,16 +458,24 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // ==================================================
-    // Arabic Font & Quranic Text Appearance Customization
+    // Arabic Font, Quranic Text & Independent Tashkeel Colors (Requirements 03, 04, 09, 12)
     // ==================================================
     fun updateArabicFont(font: ArabicQuranFont) {
         _uiState.update { it.copy(textStyle = it.textStyle.copy(font = font)) }
     }
 
+    fun resetArabicFont() {
+        updateArabicFont(ArabicQuranFont.KFGQPC_UTHMANIC)
+    }
+
     fun updateFontSizeSp(sizeSp: Float) {
         _uiState.update {
-            it.copy(textStyle = it.textStyle.copy(fontSizeSp = sizeSp.coerceIn(16f, 44f)))
+            it.copy(textStyle = it.textStyle.copy(fontSizeSp = sizeSp.coerceIn(16f, 46f)))
         }
+    }
+
+    fun resetFontSizeSp() {
+        updateFontSizeSp(28f)
     }
 
     fun updateLineSpacing(multiplier: Float) {
@@ -403,35 +484,108 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun resetLineSpacing() {
+        updateLineSpacing(1.45f)
+    }
+
     fun updateTextColor(colorOption: TextColorOption) {
-        _uiState.update { it.copy(textStyle = it.textStyle.copy(colorOption = colorOption)) }
+        _uiState.update {
+            it.copy(
+                textStyle = it.textStyle.copy(
+                    colorOption = colorOption,
+                    mainTextColorHex = colorOption.colorHex
+                )
+            )
+        }
+    }
+
+    fun updateMainTextColorHex(colorHex: Long) {
+        val matchingOption = TextColorOption.entries.find { it.colorHex == colorHex } ?: _uiState.value.textStyle.colorOption
+        _uiState.update {
+            it.copy(
+                textStyle = it.textStyle.copy(
+                    colorOption = matchingOption,
+                    mainTextColorHex = colorHex
+                )
+            )
+        }
+    }
+
+    fun resetMainTextColor() {
+        updateMainTextColorHex(0xFFFFFFFF)
+    }
+
+    fun toggleIndependentTashkeelColor(enabled: Boolean) {
+        _uiState.update {
+            it.copy(textStyle = it.textStyle.copy(enableIndependentTashkeelColor = enabled))
+        }
+    }
+
+    fun updateTashkeelColorHex(colorHex: Long) {
+        _uiState.update {
+            it.copy(
+                textStyle = it.textStyle.copy(
+                    enableIndependentTashkeelColor = true,
+                    tashkeelColorHex = colorHex
+                )
+            )
+        }
+    }
+
+    fun resetTashkeelColor() {
+        _uiState.update {
+            it.copy(
+                textStyle = it.textStyle.copy(
+                    enableIndependentTashkeelColor = true,
+                    tashkeelColorHex = 0xFFE8872F
+                )
+            )
+        }
     }
 
     fun updateTextAlignment(alignment: QuranTextAlignment) {
         _uiState.update { it.copy(textStyle = it.textStyle.copy(alignment = alignment)) }
     }
 
+    fun resetTextAlignment() {
+        updateTextAlignment(QuranTextAlignment.CENTER)
+    }
+
     fun updateTextBold(bold: Boolean) {
         _uiState.update { it.copy(textStyle = it.textStyle.copy(isBold = bold)) }
+    }
+
+    fun toggleSingleLineDisplay(singleLine: Boolean) {
+        _uiState.update { it.copy(textStyle = it.textStyle.copy(singleLineDisplay = singleLine)) }
     }
 
     fun updateTextPosition(normX: Float, normY: Float) {
         _uiState.update {
             it.copy(
                 textStyle = it.textStyle.copy(
-                    normalizedX = normX.coerceIn(0.15f, 0.85f),
-                    normalizedY = normY.coerceIn(0.20f, 0.80f)
+                    normalizedX = normX.coerceIn(0.12f, 0.88f),
+                    normalizedY = normY.coerceIn(0.14f, 0.86f),
+                    isAutoPositioned = false
                 )
             )
         }
     }
 
-    fun toggleShowSurahHeader(show: Boolean) {
-        _uiState.update { it.copy(textStyle = it.textStyle.copy(showSurahHeader = show)) }
-    }
-
-    fun toggleShowReciterName(show: Boolean) {
-        _uiState.update { it.copy(textStyle = it.textStyle.copy(showReciterName = show)) }
+    fun restoreAutomaticPositioning() {
+        val state = _uiState.value
+        val autoResult = QuranTextAndLayoutEngine.computeAutoLayout(
+            aspectRatio = state.aspectRatio,
+            currentTextStyle = state.textStyle,
+            currentHeader = state.recitationHeader,
+            currentWatermark = state.watermark
+        )
+        _uiState.update {
+            it.copy(
+                textStyle = autoResult.textStyle,
+                recitationHeader = autoResult.headerConfig,
+                watermark = autoResult.watermarkConfig
+            )
+        }
     }
 
     fun toggleShowTafsir(show: Boolean) {
@@ -443,8 +597,136 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // ==================================================
-    // Tasneem Watermark Customization ("تسنيم")
+    // Independent Recitation Header Settings (Requirement 08 - إعدادات معلومات التلاوة)
     // ==================================================
+    fun updateSurahHeaderElement(transform: (HeaderElementConfig) -> HeaderElementConfig) {
+        _uiState.update {
+            val updated = transform(it.recitationHeader.surahName)
+            it.copy(
+                recitationHeader = it.recitationHeader.copy(surahName = updated),
+                textStyle = it.textStyle.copy(showSurahHeader = updated.visible)
+            )
+        }
+    }
+
+    fun resetSurahHeaderElement() {
+        val default = RecitationHeaderConfig().surahName
+        _uiState.update {
+            it.copy(
+                recitationHeader = it.recitationHeader.copy(surahName = default),
+                textStyle = it.textStyle.copy(showSurahHeader = default.visible)
+            )
+        }
+    }
+
+    fun updateVerseNumberHeaderElement(transform: (HeaderElementConfig) -> HeaderElementConfig) {
+        _uiState.update {
+            val updated = transform(it.recitationHeader.verseNumber)
+            it.copy(recitationHeader = it.recitationHeader.copy(verseNumber = updated))
+        }
+    }
+
+    fun resetVerseNumberHeaderElement() {
+        val default = RecitationHeaderConfig().verseNumber
+        _uiState.update {
+            it.copy(recitationHeader = it.recitationHeader.copy(verseNumber = default))
+        }
+    }
+
+    fun updateReciterHeaderElement(transform: (HeaderElementConfig) -> HeaderElementConfig) {
+        _uiState.update {
+            val updated = transform(it.recitationHeader.reciterName)
+            it.copy(
+                recitationHeader = it.recitationHeader.copy(reciterName = updated),
+                textStyle = it.textStyle.copy(showReciterName = updated.visible)
+            )
+        }
+    }
+
+    fun resetReciterHeaderElement() {
+        val default = RecitationHeaderConfig().reciterName
+        _uiState.update {
+            it.copy(
+                recitationHeader = it.recitationHeader.copy(reciterName = default),
+                textStyle = it.textStyle.copy(showReciterName = default.visible)
+            )
+        }
+    }
+
+    // Legacy convenience delegators
+    fun toggleShowSurahHeader(show: Boolean) {
+        updateSurahHeaderElement { it.copy(visible = show) }
+    }
+
+    fun toggleShowReciterName(show: Boolean) {
+        updateReciterHeaderElement { it.copy(visible = show) }
+    }
+
+    // ==================================================
+    // Transition Effects Between Verses & Phrases (Requirement 06)
+    // ==================================================
+    fun updateTransitionEffect(effect: TransitionEffectType) {
+        _uiState.update {
+            it.copy(verseTransition = it.verseTransition.copy(effectType = effect))
+        }
+    }
+
+    fun updateTransitionSpeedPreset(preset: TransitionSpeedPreset) {
+        _uiState.update {
+            it.copy(
+                verseTransition = it.verseTransition.copy(
+                    speedPreset = preset,
+                    durationMs = preset.durationMs
+                )
+            )
+        }
+    }
+
+    fun updateTransitionDurationMs(durationMs: Long) {
+        _uiState.update {
+            it.copy(
+                verseTransition = it.verseTransition.copy(
+                    durationMs = durationMs.coerceIn(80L, 1000L)
+                )
+            )
+        }
+    }
+
+    fun resetTransitionSettings() {
+        _uiState.update { it.copy(verseTransition = VerseTransitionConfig()) }
+    }
+
+    // ==================================================
+    // Personal Signature ("التوقيع الشخصي") & Social Media Icons (Requirement 10)
+    // ==================================================
+    fun toggleWatermarkEnabled(enabled: Boolean) {
+        _uiState.update { it.copy(watermark = it.watermark.copy(enabled = enabled)) }
+    }
+
+    fun updateSignatureText(text: String) {
+        _uiState.update { it.copy(watermark = it.watermark.copy(signatureText = text.take(40))) }
+    }
+
+    fun resetSignatureText() {
+        updateSignatureText("تسنيم")
+    }
+
+    fun updateSignatureFont(font: ArabicQuranFont) {
+        _uiState.update { it.copy(watermark = it.watermark.copy(font = font)) }
+    }
+
+    fun resetSignatureFont() {
+        updateSignatureFont(ArabicQuranFont.CAIRO)
+    }
+
+    fun updateSignatureColorHex(colorHex: Long) {
+        _uiState.update { it.copy(watermark = it.watermark.copy(colorHex = colorHex)) }
+    }
+
+    fun resetSignatureColor() {
+        updateSignatureColorHex(0xFFF5F1EA)
+    }
+
     fun applyWatermarkPreset(preset: WatermarkPresetPosition) {
         _uiState.update {
             it.copy(
@@ -467,10 +749,18 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun resetWatermarkPosition() {
+        applyWatermarkPreset(WatermarkPresetPosition.BOTTOM_CENTER)
+    }
+
     fun updateWatermarkFontSize(sizeSp: Float) {
         _uiState.update {
-            it.copy(watermark = it.watermark.copy(fontSizeSp = sizeSp.coerceIn(11f, 26f)))
+            it.copy(watermark = it.watermark.copy(fontSizeSp = sizeSp.coerceIn(11f, 28f)))
         }
+    }
+
+    fun resetWatermarkFontSize() {
+        updateWatermarkFontSize(15f)
     }
 
     fun updateWatermarkScale(scale: Float) {
@@ -479,16 +769,28 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun resetWatermarkScale() {
+        updateWatermarkScale(1.0f)
+    }
+
     fun updateWatermarkOpacity(opacity: Float) {
         _uiState.update {
             it.copy(watermark = it.watermark.copy(opacity = opacity.coerceIn(0.2f, 1.0f)))
         }
     }
 
+    fun resetWatermarkOpacity() {
+        updateWatermarkOpacity(0.82f)
+    }
+
     fun updateWatermarkMargin(marginDp: Float) {
         _uiState.update {
             it.copy(watermark = it.watermark.copy(marginDp = marginDp.coerceIn(8f, 48f)))
         }
+    }
+
+    fun resetWatermarkMargin() {
+        updateWatermarkMargin(16f)
     }
 
     fun toggleWatermarkShadow(enabled: Boolean) {
@@ -499,15 +801,81 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
         _uiState.update { it.copy(watermark = it.watermark.copy(elegantGlow = enabled)) }
     }
 
+    fun toggleSocialPlatform(platform: SocialPlatform) {
+        _uiState.update {
+            val current = it.watermark.selectedSocialPlatforms.toMutableSet()
+            if (platform in current) {
+                current.remove(platform)
+            } else {
+                current.add(platform)
+            }
+            it.copy(watermark = it.watermark.copy(selectedSocialPlatforms = current))
+        }
+    }
+
+    fun updateSocialIconsSizeDp(sizeDp: Float) {
+        _uiState.update {
+            it.copy(watermark = it.watermark.copy(socialIconsSizeDp = sizeDp.coerceIn(12f, 34f)))
+        }
+    }
+
+    fun resetSocialIconsSizeDp() {
+        updateSocialIconsSizeDp(18f)
+    }
+
+    fun updateSocialIconsOffsetY(offsetY: Float) {
+        _uiState.update {
+            it.copy(watermark = it.watermark.copy(socialIconsOffsetY = offsetY.coerceIn(-0.5f, 0.5f)))
+        }
+    }
+
+    fun resetSocialIconsSettings() {
+        _uiState.update {
+            it.copy(
+                watermark = it.watermark.copy(
+                    selectedSocialPlatforms = emptySet(),
+                    socialIconsSizeDp = 18f,
+                    socialIconsOffsetY = 0f
+                )
+            )
+        }
+    }
+
     // ==================================================
     // Aspect Ratio, Resolution & Complete MP4 Video Export
     // ==================================================
     fun updateAspectRatio(ratio: VideoAspectRatio) {
-        _uiState.update { it.copy(aspectRatio = ratio, exportState = VideoExportState.Idle) }
+        _uiState.update { current ->
+            if (current.textStyle.isAutoPositioned) {
+                val auto = QuranTextAndLayoutEngine.computeAutoLayout(
+                    aspectRatio = ratio,
+                    currentTextStyle = current.textStyle,
+                    currentHeader = current.recitationHeader,
+                    currentWatermark = current.watermark
+                )
+                current.copy(
+                    aspectRatio = ratio,
+                    textStyle = auto.textStyle,
+                    recitationHeader = auto.headerConfig,
+                    watermark = auto.watermarkConfig,
+                    exportState = VideoExportState.Idle
+                )
+            } else {
+                current.copy(aspectRatio = ratio, exportState = VideoExportState.Idle)
+            }
+        }
+    }
+
+    fun resetAspectRatio() {
+        updateAspectRatio(VideoAspectRatio.PORTRAIT_9_16)
     }
 
     fun updateVideoResolution(resolution: VideoResolution) {
         _uiState.update { it.copy(resolution = resolution, exportState = VideoExportState.Idle) }
+    }
+
+    fun resetVideoResolution() {
+        updateVideoResolution(VideoResolution.RES_1080P)
     }
 
     fun startMp4VideoExport() {
@@ -528,23 +896,28 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
             return
         }
 
-        if (state.phoneMedia.uriString.isNullOrBlank()) {
-            _uiState.update {
-                it.copy(exportState = VideoExportState.Failed("يرجى اختيار صورة أو فيديو من الهاتف كخلفية للفيديو قبل التصدير."))
-            }
-            return
-        }
-
         syncEngine.pause()
         exportJob?.cancel()
         exportJob = viewModelScope.launch {
+            // If no media background was chosen yet, prepare the default curated background automatically
+            val activeMedia = if (state.phoneMedia.uriString.isNullOrBlank()) {
+                val fallbackItem = curatedMediaRepository.allItems.first()
+                val prepared = curatedMediaRepository.prepareAndCacheMediaItem(fallbackItem, state.phoneMedia.dimLevel)
+                _uiState.update { it.copy(phoneMedia = prepared) }
+                prepared
+            } else {
+                state.phoneMedia
+            }
+
             mp4RenderEngine.renderCompleteMp4Video(
                 surahNameAr = state.selectedSurah.nameAr,
                 verses = state.selectedVerses,
                 audioSegments = dlState.segments,
                 reciterNameAr = state.selectedReciter.nameAr,
-                mediaBackground = state.phoneMedia,
+                mediaBackground = activeMedia,
                 textStyleConfig = state.textStyle,
+                headerConfig = state.recitationHeader,
+                transitionConfig = state.verseTransition,
                 watermarkConfig = state.watermark,
                 resolution = state.resolution,
                 aspectRatio = state.aspectRatio
@@ -636,7 +1009,8 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
                 context,
                 "تعذر فتح نافذة المشاركة: ${e.localizedMessage ?: ""}",
                 Toast.LENGTH_SHORT
-            ).show()
+            )
+                .show()
         }
     }
 

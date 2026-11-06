@@ -12,10 +12,12 @@ import com.example.ui.theme.AmiriFontFamily
 import com.example.ui.theme.AmiriQuranFontFamily
 import com.example.ui.theme.CairoFontFamily
 import com.example.ui.theme.IbmPlexSansArabicFontFamily
+import com.example.ui.theme.KfgqpcUthmanicFontFamily
 import com.example.ui.theme.LateefFontFamily
 import com.example.ui.theme.NotoNaskhArabicFontFamily
 import com.example.ui.theme.NotoSansArabicFontFamily
 import com.example.ui.theme.ScheherazadeNewFontFamily
+import java.util.concurrent.ConcurrentHashMap
 
 data class SurahInfo(
     val number: Int,
@@ -71,69 +73,77 @@ enum class ArabicQuranFont(
 ) {
     KFGQPC_UTHMANIC(
         id = "kfgqpc_uthmanic",
-        displayNameAr = "الرسم العثماني المصحفي (مصحف المدينة / أميري قرآن)",
-        descriptionAr = "خط مصحفي مضبوط التشكيل وعلامات الوقف للآيات القرآنية",
-        fontResId = R.font.amiri_quran,
-        composeFontFamily = AmiriQuranFontFamily,
-        licensingNoteAr = "يدعم الرسم العثماني وتشكيل المصحف الشريف وفق الضوابط القياسية"
+        displayNameAr = "خط مصحف المدينة العثماني (KFGQPC Uthmanic)",
+        descriptionAr = "خط مجمع الملك فهد لطباعة المصحف الشريف بالرسم العثماني الأصيل",
+        fontResId = R.font.kfgqpc_uthmanic,
+        composeFontFamily = KfgqpcUthmanicFontFamily,
+        licensingNoteAr = "خط حفص العثماني القياسي للمصحف الشريف"
     ),
     AMIRI(
         id = "amiri",
-        displayNameAr = "خط أميري (Amiri)",
-        descriptionAr = "خط نسخ كلاسيكي عريق مستوحى من مطبعة بولاق",
+        displayNameAr = "خط أميري الكلاسيكي (Amiri)",
+        descriptionAr = "خط نسخ أدبي عريق مستوحى من مطبعة بولاق بالقاهرة",
         fontResId = R.font.amiri,
         composeFontFamily = AmiriFontFamily
     ),
     SCHEHERAZADE_NEW(
         id = "scheherazade_new",
-        displayNameAr = "خط شهرزاد الجديد (Scheherazade New)",
-        descriptionAr = "خط نسخ تقليدي واضح التشكيل والحركات القرآنية",
+        displayNameAr = "خط شهرزاد المصحفي (Scheherazade New)",
+        descriptionAr = "خط نسخ تقليدي واسع الحروف واضح الحركات والمدود",
         fontResId = R.font.scheherazade_new,
         composeFontFamily = ScheherazadeNewFontFamily
     ),
     NOTO_NASKH_ARABIC(
         id = "noto_naskh_arabic",
         displayNameAr = "نوتو نسخ عربي (Noto Naskh Arabic)",
-        descriptionAr = "خط نسخ متوازن فائق الوضوح للشاشات العالية الدقة",
+        descriptionAr = "خط نسخ متوازن فائق الوضوح للشاشات الذكية",
         fontResId = R.font.noto_naskh_arabic,
         composeFontFamily = NotoNaskhArabicFontFamily
     ),
     LATEEF(
         id = "lateef",
-        displayNameAr = "خط لطيف (Lateef)",
-        descriptionAr = "خط عربي انسيابي ناعم يناسب المقاطع الروحانية",
+        displayNameAr = "خط لطيف الروحاني (Lateef)",
+        descriptionAr = "خط عربي انسيابي طويل القوائم يناسب المقاطع الهادئة",
         fontResId = R.font.lateef,
         composeFontFamily = LateefFontFamily
     ),
     NOTO_SANS_ARABIC(
         id = "noto_sans_arabic",
         displayNameAr = "نوتو سانس عربي (Noto Sans Arabic)",
-        descriptionAr = "خط عصري واضح القراءة في مختلف الأحجام",
+        descriptionAr = "خط عصري مجرد واضح القراءة في المقاطع السريعة",
         fontResId = R.font.noto_sans_arabic,
         composeFontFamily = NotoSansArabicFontFamily
     ),
     CAIRO(
         id = "cairo",
-        displayNameAr = "خط القاهرة (Cairo)",
-        descriptionAr = "خط عربي حديث يجمع بين الأصالة والوضوح البصري",
+        displayNameAr = "خط القاهرة الهندسي (Cairo)",
+        descriptionAr = "خط عربي حديث ذو طابع هندسي متماسك",
         fontResId = R.font.cairo,
         composeFontFamily = CairoFontFamily
     ),
     IBM_PLEX_SANS_ARABIC(
         id = "ibm_plex_sans_arabic",
         displayNameAr = "آي بي إم بليكس عربي (IBM Plex Sans Arabic)",
-        descriptionAr = "خط هندسي احترافي متناسق الحروف والمسافات",
+        descriptionAr = "خط تقني احترافي متناسق الحروف والمسافات",
         fontResId = R.font.ibm_plex_sans_arabic,
         composeFontFamily = IbmPlexSansArabicFontFamily
     );
 
     fun loadTypeface(context: Context, bold: Boolean = false): Typeface {
+        val cacheKey = "${id}_$bold"
+        typefaceCache[cacheKey]?.let { return it }
         val base = try {
-            ResourcesCompat.getFont(context, fontResId) ?: Typeface.DEFAULT
+            ResourcesCompat.getFont(context.applicationContext, fontResId) ?: Typeface.DEFAULT
         } catch (e: Exception) {
             Typeface.DEFAULT
         }
-        return if (bold) Typeface.create(base, Typeface.BOLD) else base
+        val resolved = if (bold) Typeface.create(base, Typeface.BOLD) else base
+        typefaceCache[cacheKey] = resolved
+        return resolved
+    }
+
+    companion object {
+        private val typefaceCache = ConcurrentHashMap<String, Typeface>()
     }
 }
 
@@ -143,8 +153,8 @@ enum class QuranTextAlignment(
     val composeAlign: TextAlign
 ) {
     CENTER("center", "توسيط", TextAlign.Center),
-    RIGHT("right", "محاذاة لليمين", TextAlign.Right),
-    JUSTIFY("justify", "ضبط الكلمات", TextAlign.Justify)
+    RIGHT("right", "يمين", TextAlign.Right),
+    LEFT("left", "يسار", TextAlign.Left)
 }
 
 enum class TextColorOption(
@@ -156,26 +166,132 @@ enum class TextColorOption(
     WHITE("white", "أبيض ناصع", 0xFFFFFFFF, Color(0xFFFFFFFF)),
     SOFT_IVORY("soft_ivory", "عاجي ناعم", 0xFFF5F1EA, Color(0xFFF5F1EA)),
     TASNEEM_ORANGE("tasneem_orange", "برتقالي تسنيم", 0xFFE8872F, Color(0xFFE8872F)),
+    WARM_GOLD("warm_gold", "ذهبي دافئ", 0xFFF3B35A, Color(0xFFF3B35A)),
     SILVER_GRAY("silver_gray", "فضي هادئ", 0xFFC5C8CB, Color(0xFFC5C8CB)),
+    SKY_ICE("sky_ice", "سماوي فاتح", 0xFFD9ECF2, Color(0xFFD9ECF2)),
     DEEP_CHARCOAL("deep_charcoal", "فحمي داكن", 0xFF1D2227, Color(0xFF1D2227))
 }
 
 data class QuranTextStyleConfig(
     val font: ArabicQuranFont = ArabicQuranFont.KFGQPC_UTHMANIC,
-    val fontSizeSp: Float = 26f,
-    val lineSpacingMultiplier: Float = 1.55f,
+    val fontSizeSp: Float = 28f,
+    val lineSpacingMultiplier: Float = 1.45f,
     val colorOption: TextColorOption = TextColorOption.WHITE,
+    val mainTextColorHex: Long = 0xFFFFFFFF,
+    val enableIndependentTashkeelColor: Boolean = true,
+    val tashkeelColorHex: Long = 0xFFE8872F,
     val alignment: QuranTextAlignment = QuranTextAlignment.CENTER,
     val isBold: Boolean = false,
-    val normalizedX: Float = 0.5f, // 0..1 center X in frame
-    val normalizedY: Float = 0.5f, // 0..1 center Y in frame
+    val normalizedX: Float = 0.50f,
+    val normalizedY: Float = 0.48f,
+    val isAutoPositioned: Boolean = true,
+    val singleLineDisplay: Boolean = true,
     val showSurahHeader: Boolean = true,
     val showReciterName: Boolean = true,
     val showTafsir: Boolean = false,
     val showTranslation: Boolean = false,
-    val translationFontSizeScale: Float = 0.72f,
+    val translationFontSizeScale: Float = 0.65f,
     val smoothTransitions: Boolean = true
 )
+
+/**
+ * Independent Header Element Configuration (Requirement 08 - إعدادات معلومات التلاوة)
+ */
+data class HeaderElementConfig(
+    val visible: Boolean = true,
+    val normalizedX: Float = 0.50f,
+    val normalizedY: Float = 0.20f,
+    val fontSizeSp: Float = 18f,
+    val font: ArabicQuranFont = ArabicQuranFont.AMIRI,
+    val colorHex: Long = 0xFFF5F1EA,
+    val opacity: Float = 0.92f,
+    val alignment: QuranTextAlignment = QuranTextAlignment.CENTER,
+    val marginDp: Float = 16f
+)
+
+data class RecitationHeaderConfig(
+    val surahName: HeaderElementConfig = HeaderElementConfig(
+        visible = true,
+        normalizedX = 0.50f,
+        normalizedY = 0.21f,
+        fontSizeSp = 22f,
+        font = ArabicQuranFont.KFGQPC_UTHMANIC,
+        colorHex = 0xFFF5F1EA,
+        opacity = 0.95f,
+        alignment = QuranTextAlignment.CENTER,
+        marginDp = 16f
+    ),
+    val verseNumber: HeaderElementConfig = HeaderElementConfig(
+        visible = true,
+        normalizedX = 0.50f,
+        normalizedY = 0.27f,
+        fontSizeSp = 15f,
+        font = ArabicQuranFont.CAIRO,
+        colorHex = 0xFFE8872F,
+        opacity = 0.92f,
+        alignment = QuranTextAlignment.CENTER,
+        marginDp = 14f
+    ),
+    val reciterName: HeaderElementConfig = HeaderElementConfig(
+        visible = true,
+        normalizedX = 0.50f,
+        normalizedY = 0.68f,
+        fontSizeSp = 16f,
+        font = ArabicQuranFont.CAIRO,
+        colorHex = 0xFFF5F1EA,
+        opacity = 0.88f,
+        alignment = QuranTextAlignment.CENTER,
+        marginDp = 16f
+    )
+)
+
+/**
+ * Transition Effects Between Verses & Phrases (Requirement 06)
+ */
+enum class TransitionEffectType(
+    val id: String,
+    val titleAr: String,
+    val subtitleAr: String
+) {
+    FADE_IN_OUT("fade_in_out", "تلاشي ناعم (Fade In / Out)", "ظهور واختفاء تدريجي مريح للعين"),
+    SMOOTH_SLIDE("smooth_slide", "انزلاق انسيابي (Smooth Slide)", "حركة أفقية/عمودية ناعمة مع التلاوة"),
+    GENTLE_ZOOM("gentle_zoom", "تقريب هادئ (Gentle Zoom)", "بروز لطيف للمقطع المقروء"),
+    DISSOLVE("dissolve", "ذوبان بصري (Dissolve)", "انتقال ضوئي متدرج بين المقاطع"),
+    SOFT_BLUR("soft_blur", "تمويه ناعم (Soft Blur)", "تلاشي ضبابي أنيق عند الانتقال"),
+    TYPE_ON_REVEAL("type_on", "ظهور تدريجي للكلمات (Type-on Reveal)", "إظهار الكلمات بالتزامن مع النطق"),
+    ELEGANT_CROSSFADE("crossfade", "تداخل متقاطع أنيق (Crossfade)", "تبديل انسيابي متناغم بين الآيات")
+}
+
+enum class TransitionSpeedPreset(
+    val id: String,
+    val labelAr: String,
+    val durationMs: Long
+) {
+    VERY_SLOW("very_slow", "بطيء جدًا", 750L),
+    SLOW("slow", "بطيء", 550L),
+    NORMAL("normal", "عادي", 360L),
+    FAST("fast", "سريع", 220L),
+    VERY_FAST("very_fast", "سريع جدًا", 130L)
+}
+
+data class VerseTransitionConfig(
+    val effectType: TransitionEffectType = TransitionEffectType.ELEGANT_CROSSFADE,
+    val speedPreset: TransitionSpeedPreset = TransitionSpeedPreset.NORMAL,
+    val durationMs: Long = 360L
+)
+
+/**
+ * Social Media Platforms for Personal Signature (Requirement 10)
+ */
+enum class SocialPlatform(
+    val id: String,
+    val labelAr: String
+) {
+    FACEBOOK("facebook", "فيسبوك"),
+    INSTAGRAM("instagram", "إنستغرام"),
+    TIKTOK("tiktok", "تيك توك"),
+    YOUTUBE("youtube", "يوتيوب")
+}
 
 enum class WatermarkPresetPosition(
     val id: String,
@@ -183,23 +299,30 @@ enum class WatermarkPresetPosition(
     val normX: Float,
     val normY: Float
 ) {
-    BOTTOM_CENTER("bottom_center", "أسفل الوسط", 0.5f, 0.91f),
-    BOTTOM_RIGHT("bottom_right", "أسفل اليمين", 0.82f, 0.91f),
-    BOTTOM_LEFT("bottom_left", "أسفل اليسار", 0.18f, 0.91f),
-    TOP_RIGHT("top_right", "أعلى اليمين", 0.82f, 0.09f),
-    TOP_LEFT("top_left", "أعلى اليسار", 0.18f, 0.09f)
+    BOTTOM_CENTER("bottom_center", "أسفل الوسط", 0.50f, 0.80f),
+    BOTTOM_RIGHT("bottom_right", "أسفل اليمين", 0.78f, 0.80f),
+    BOTTOM_LEFT("bottom_left", "أسفل اليسار", 0.22f, 0.80f),
+    TOP_RIGHT("top_right", "أعلى اليمين", 0.78f, 0.14f),
+    TOP_LEFT("top_left", "أعلى اليسار", 0.22f, 0.14f)
 }
 
 data class WatermarkConfig(
+    val enabled: Boolean = true,
     val signatureText: String = "تسنيم",
-    val normalizedX: Float = 0.5f,
-    val normalizedY: Float = 0.91f,
+    val font: ArabicQuranFont = ArabicQuranFont.CAIRO,
+    val colorHex: Long = 0xFFF5F1EA,
+    val alignment: QuranTextAlignment = QuranTextAlignment.CENTER,
+    val normalizedX: Float = 0.50f,
+    val normalizedY: Float = 0.80f,
     val fontSizeSp: Float = 15f,
     val scale: Float = 1.0f,
-    val opacity: Float = 0.78f,
+    val opacity: Float = 0.82f,
     val marginDp: Float = 16f,
     val subtleShadow: Boolean = true,
-    val elegantGlow: Boolean = true
+    val elegantGlow: Boolean = true,
+    val selectedSocialPlatforms: Set<SocialPlatform> = emptySet(),
+    val socialIconsSizeDp: Float = 18f,
+    val socialIconsOffsetY: Float = 0f // Relative vertical adjustment under signature
 )
 
 enum class MediaCropMode(val id: String, val labelAr: String) {
@@ -216,11 +339,48 @@ data class PhoneMediaBackground(
     val durationMs: Long = 0L,
     val cropMode: MediaCropMode = MediaCropMode.CENTER_CROP,
     val scale: Float = 1.0f,
-    val offsetX: Float = 0f, // -1f .. 1f
-    val offsetY: Float = 0f, // -1f .. 1f
-    val brightness: Float = 0f, // -0.6f .. +0.6f
-    val dimLevel: Float = 0.52f, // 0f .. 0.9f background darkening for readability
-    val loopVideoInExport: Boolean = true
+    val offsetX: Float = 0f,
+    val offsetY: Float = 0f,
+    val brightness: Float = 0f,
+    val dimLevel: Float = 0.52f,
+    val loopVideoInExport: Boolean = true,
+    val curatedItemId: String? = null
+)
+
+/**
+ * Curated Nature & Islamic Background Media Library Categories (Requirement 14)
+ */
+enum class BackgroundCategory(
+    val id: String,
+    val titleAr: String
+) {
+    NATURE_LANDSCAPES("nature_landscapes", "الطبيعة والمناظر الطبيعية"),
+    MOUNTAINS("mountains", "الجبال والقمم"),
+    RIVERS_WATERFALLS("rivers_waterfalls", "الأنهار والشلالات"),
+    FORESTS_TREES("forests_trees", "الغابات والأشجار"),
+    DESERTS_DUNES("deserts_dunes", "الصحاري والكثبان الرملية"),
+    SKY_CLOUDS("sky_clouds", "السماء والسحب"),
+    SUNSETS_SUNRISES("sunsets_sunrises", "الغروب والشروق"),
+    NIGHT_STARS("night_stars", "سماء الليل والنجوم"),
+    ISLAMIC_ARCHITECTURE("islamic_architecture", "العمارة الإسلامية"),
+    MOSQUES_MINARETS("mosques_minarets", "المساجد والمآذن"),
+    HOLY_KAABA("holy_kaaba", "الكعبة المشرفة"),
+    MADINAH_PROPHET_MOSQUE("madinah_mosque", "المدينة المنورة والمسجد النبوي"),
+    HAJJ_UMRAH("hajj_umrah", "الحج والعمرة"),
+    ISLAMIC_GEOMETRIC_ART("islamic_geometric", "الزخارف الهندسية الإسلامية"),
+    PEACEFUL_SPIRITUAL("peaceful_spiritual", "المشاهد الروحانية الهادئة")
+}
+
+data class CuratedBackgroundMediaItem(
+    val id: String,
+    val titleAr: String,
+    val category: BackgroundCategory,
+    val isVideo: Boolean,
+    val thumbnailUrl: String,
+    val mediaUrl: String,
+    val durationSeconds: Int = 0,
+    val licenseInfoAr: String = "ملكية عامة / ترخيص مشاع مفتوح (CC0 / Public Domain)",
+    val primaryPaletteColors: List<Long> = listOf(0xFF1D2227, 0xFF343A40, 0xFFE8872F)
 )
 
 enum class VideoResolution(
@@ -254,7 +414,7 @@ enum class VideoAspectRatio(
     val labelAr: String,
     val ratioValue: Float // width / height
 ) {
-    PORTRAIT_9_16("9:16", "طولي 9:16 (ريلز / شورتس)", 9f / 16f),
+    PORTRAIT_9_16("9:16", "طولي 9:16 (ريلز / شورتس / تيك توك)", 9f / 16f),
     LANDSCAPE_16_9("16:9", "عرضي 16:9 (يوتيوب / شاشات)", 16f / 9f),
     SQUARE_1_1("1:1", "مربع 1:1 (منشورات)", 1f / 1f);
 
