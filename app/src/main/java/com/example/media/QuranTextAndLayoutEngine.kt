@@ -7,6 +7,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import com.example.data.QuranDataRepository
 import com.example.model.HeaderElementConfig
 import com.example.model.QuranTextStyleConfig
 import com.example.model.QuranVerse
@@ -88,6 +89,45 @@ object QuranTextAndLayoutEngine {
             if (ch.code in 0x06D6..0x06DC) return true
         }
         return false
+    }
+
+    private fun isStandaloneWaqfToken(token: String): Boolean {
+        return token.isNotEmpty() && token.all { it.code in 0x06D6..0x06ED }
+    }
+
+    /**
+     * Arabic prepositions, particles, demonstratives, and relative pronouns that must NEVER
+     * be left dangling at the end of a phrase slice (e.g. never split right after "فِىٓ" or "مِن" or "لَا").
+     */
+    private val NON_BREAKABLE_ENDING_SKELETONS = setOf(
+        "في", "من", "الي", "علي", "عن", "مع", "حتي", "مذ", "منذ",
+        "ان", "لا", "ما", "لم", "لن", "قد", "لقد", "سوف", "هل", "بل", "ام", "او", "ثم",
+        "الذي", "التي", "الذين", "اللائي", "اللاتي",
+        "هذا", "هذه", "ذلك", "تلك", " اولئك",
+        "غير", "دون", "بين", "عند", "قبل", "بعد", "فوق", "تحت", "حول", "كل", "بعض", "اي",
+        "يا", "ايها", "ايتها", "رب", "بسم", "باسم"
+    )
+
+    private fun isNonBreakableEndingWord(token: String): Boolean {
+        val skeleton = QuranDataRepository.toConsonantalSkeleton(token)
+        return skeleton in NON_BREAKABLE_ENDING_SKELETONS
+    }
+
+    private fun isNaturalClauseStarterWord(token: String): Boolean {
+        val skeleton = QuranDataRepository.toConsonantalSkeleton(token)
+        return skeleton.startsWith("فلهم") ||
+            skeleton.startsWith("فله") ||
+            skeleton.startsWith("ولا") ||
+            skeleton.startsWith("وما") ||
+            skeleton.startsWith("والذين") ||
+            skeleton.startsWith("فمن") ||
+            skeleton.startsWith("الا") ||
+            skeleton.startsWith("ثم") ||
+            skeleton.startsWith("حتي") ||
+            skeleton.startsWith("كذلك") ||
+            skeleton.startsWith("اولئك") ||
+            skeleton.startsWith("وهو") ||
+            skeleton.startsWith("انما")
     }
 
     /**
@@ -185,24 +225,49 @@ object QuranTextAndLayoutEngine {
     }
 
     /**
-     * Splits a Quranic verse into sequential single-line readable phrases (Requirements 05 & 09)
-     * so that:
-     * 1. Long verses (e.g., Ayat al-Kursi 2:255 or Al-Baqarah 2:282) are NEVER truncated.
-     * 2. Only the currently recited phrase is shown on ONE single line.
-     * 3. Each phrase is synchronized with the reciter's word timings (or proportional character timing).
+     * Segments a Quranic verse into complete, natural single-line phrases (Sections 01, 02, 03, 06, 07):
+     * 1. Enforces Madinah Mushaf (Hafs 'an Asim) Basmala accuracy: strips any unrecited leading Basmala
+     *    from Verse 1 of Surahs 2..8 and 10..114, preserves Surah Al-Fatihah 1:1, never adds Basmala to
+     *    Surah Al-Tawbah 9, and preserves the internal Basmala in Surah An-Naml 27:30.
+     * 2. If the full verse fits on one single readable line (<= 8 words and <= 48 base characters, e.g.
+     *    Surah At-Tin 95:1..5 & 95:7..8, Al-Ikhlas 112:1..4, Al-Fatihah 1:1..6, An-Naml 27:30),
+     *    displays the COMPLETE verse on one line without splitting it!
+     * 3. If a verse is longer (e.g. 95:6, 1:7, or Ayat al-Kursi 2:255), splits ONLY at natural Quranic
+     *    Waqf pause marks (\u06D6..\u06DC) or complete grammatical clauses, NEVER breaking after a
+     *    preposition/particle (such as "فِىٓ" or "مِن" or "لَا").
+     * 4. Synchronizes phrase start/end boundaries strictly to the reciter's word-level timestamps
+     *    (or acoustic speech-envelope forced alignment), advancing to the next phrase ONLY when the
+     *    reciter begins uttering the first word of the next phrase.
      */
     fun segmentVerseIntoSingleLinePhrases(
         verse: QuranVerse,
         segment: VerseAudioSegment?,
-        maxWordsPerPhrase: Int = 4,
-        maxBaseCharsPerPhrase: Int = 28
+        maxWordsPerPhrase: Int = 8,
+        maxBaseCharsPerPhrase: Int = 48
     ): List<PhraseSlice> {
-        val rawTokens = verse.uthmaniText
+        val sanitizedText = QuranDataRepository.sanitizeVerseTextForMadinahMushaf(
+            surahNumber = verse.surahNumber,
+            verseNumber = verse.verseNumber,
+            rawUthmaniText = verse.uthmaniText
+        )
+
+        // Merge standalone Waqf tokens (like "ۚ" or "ۖ") onto the preceding word so a phrase never starts with a bare pause sign
+        val rawSplit = sanitizedText
             .trim()
             .split(Regex("\\s+"))
             .filter { it.isNotBlank() }
 
-        if (rawTokens.isEmpty()) {
+        val mergedTokens = mutableListOf<String>()
+        for (token in rawSplit) {
+            if (isStandaloneWaqfToken(token) && mergedTokens.isNotEmpty()) {
+                val lastIdx = mergedTokens.lastIndex
+                mergedTokens[lastIdx] = "${mergedTokens[lastIdx]} $token"
+            } else {
+                mergedTokens.add(token)
+            }
+        }
+
+        if (mergedTokens.isEmpty()) {
             val ayahEnd = "﴿${toArabicNumerals(verse.verseNumber)}﴾"
             return listOf(
                 PhraseSlice(
@@ -218,61 +283,145 @@ object QuranTextAndLayoutEngine {
             )
         }
 
-        // Group words into concise single-line phrases (typically 3..4 words or up to pause mark)
         data class RawPhraseGroup(
             val words: MutableList<String>,
-            val startWord1Based: Int,
+            var startWord1Based: Int,
             var endWord1Based: Int
         )
 
-        val groups = mutableListOf<RawPhraseGroup>()
-        var currentWords = mutableListOf<String>()
-        var currentBaseCharCount = 0
-        var groupStartWordIdx = 1
-
-        rawTokens.forEachIndexed { idx, token ->
-            val word1Based = idx + 1
-            val tokenBaseChars = token.count { !isQuranicDiacritic(it) }.coerceAtLeast(1)
-
-            if (currentWords.isEmpty()) {
-                groupStartWordIdx = word1Based
-            }
-
-            currentWords.add(token)
-            currentBaseCharCount += tokenBaseChars
-
-            val reachedWordLimit = currentWords.size >= maxWordsPerPhrase
-            val reachedCharLimit = currentBaseCharCount >= maxBaseCharsPerPhrase && currentWords.size >= 2
-            val hitPauseMark = hasWaqfMark(token) && currentWords.size >= 2
-            val isLastWord = idx == rawTokens.lastIndex
-
-            if (!isLastWord && (reachedWordLimit || reachedCharLimit || hitPauseMark)) {
-                groups.add(
-                    RawPhraseGroup(
-                        words = currentWords.toMutableList(),
-                        startWord1Based = groupStartWordIdx,
-                        endWord1Based = word1Based
-                    )
-                )
-                currentWords = mutableListOf()
-                currentBaseCharCount = 0
-            }
+        val totalBaseCharsInVerse = mergedTokens.sumOf { tok ->
+            tok.count { !isQuranicDiacritic(it) && !it.isWhitespace() }.coerceAtLeast(1)
         }
+        val hasMidVerseWaqf = mergedTokens.dropLast(1).any { hasWaqfMark(it) }
 
-        if (currentWords.isNotEmpty()) {
-            // If trailing remainder is just 1 short word and we already have a previous group, merge it
-            if (currentWords.size == 1 && groups.isNotEmpty() && groups.last().words.size < maxWordsPerPhrase + 1) {
-                val lastGroup = groups.last()
-                lastGroup.words.addAll(currentWords)
-                lastGroup.endWord1Based = rawTokens.size
-            } else {
-                groups.add(
-                    RawPhraseGroup(
-                        words = currentWords.toMutableList(),
-                        startWord1Based = groupStartWordIdx,
-                        endWord1Based = rawTokens.size
-                    )
+        val groups = mutableListOf<RawPhraseGroup>()
+
+        // Rule A: If the entire verse fits on one single line and has no mid-verse Waqf pause split requirement,
+        // keep the COMPLETE verse as a single undivided line!
+        if (mergedTokens.size <= maxWordsPerPhrase && totalBaseCharsInVerse <= maxBaseCharsPerPhrase && !hasMidVerseWaqf) {
+            groups.add(
+                RawPhraseGroup(
+                    words = mergedTokens.toMutableList(),
+                    startWord1Based = 1,
+                    endWord1Based = mergedTokens.size
                 )
+            )
+        } else {
+            // Rule B: First split into natural clauses at Quranic Waqf marks (\u06D6..\u06DC)
+            val waqfClauses = mutableListOf<RawPhraseGroup>()
+            var clauseWords = mutableListOf<String>()
+            var clauseStartIdx = 1
+
+            mergedTokens.forEachIndexed { idx, token ->
+                val word1Based = idx + 1
+                if (clauseWords.isEmpty()) {
+                    clauseStartIdx = word1Based
+                }
+                clauseWords.add(token)
+                val isLast = idx == mergedTokens.lastIndex
+                if (!isLast && hasWaqfMark(token) && clauseWords.size >= 2) {
+                    waqfClauses.add(
+                        RawPhraseGroup(
+                            words = clauseWords.toMutableList(),
+                            startWord1Based = clauseStartIdx,
+                            endWord1Based = word1Based
+                        )
+                    )
+                    clauseWords = mutableListOf()
+                }
+            }
+            if (clauseWords.isNotEmpty()) {
+                if (clauseWords.size == 1 && waqfClauses.isNotEmpty()) {
+                    val prev = waqfClauses.last()
+                    prev.words.addAll(clauseWords)
+                    prev.endWord1Based = mergedTokens.size
+                } else {
+                    waqfClauses.add(
+                        RawPhraseGroup(
+                            words = clauseWords.toMutableList(),
+                            startWord1Based = clauseStartIdx,
+                            endWord1Based = mergedTokens.size
+                        )
+                    )
+                }
+            }
+
+            // For each Waqf clause, if it fits on one line, keep it whole; otherwise split into balanced complete sub-clauses
+            for (clause in waqfClauses) {
+                val clauseBaseChars = clause.words.sumOf { tok ->
+                    tok.count { !isQuranicDiacritic(it) && !it.isWhitespace() }.coerceAtLeast(1)
+                }
+                if (clause.words.size <= maxWordsPerPhrase && clauseBaseChars <= maxBaseCharsPerPhrase) {
+                    groups.add(clause)
+                } else {
+                    // Split long clause at natural connector words or balanced midpoint without ever breaking after a preposition
+                    var subWords = mutableListOf<String>()
+                    var subBaseChars = 0
+                    var subStartWord1Based = clause.startWord1Based
+
+                    clause.words.forEachIndexed { localIdx, word ->
+                        val globalWord1Based = clause.startWord1Based + localIdx
+                        val wordChars = word.count { !isQuranicDiacritic(it) && !it.isWhitespace() }.coerceAtLeast(1)
+                        val remainingWordsInClause = clause.words.size - localIdx
+
+                        // Check if we should break BEFORE this word because it is a natural clause starter (like "فَلَهُمْ" or "وَلَا")
+                        val canBreakBeforeCurrent = subWords.size >= 4 &&
+                            remainingWordsInClause >= 3 &&
+                            isNaturalClauseStarterWord(word) &&
+                            !isNonBreakableEndingWord(subWords.last())
+
+                        if (canBreakBeforeCurrent) {
+                            groups.add(
+                                RawPhraseGroup(
+                                    words = subWords.toMutableList(),
+                                    startWord1Based = subStartWord1Based,
+                                    endWord1Based = globalWord1Based - 1
+                                )
+                            )
+                            subWords = mutableListOf()
+                            subBaseChars = 0
+                            subStartWord1Based = globalWord1Based
+                        }
+
+                        if (subWords.isEmpty()) {
+                            subStartWord1Based = globalWord1Based
+                        }
+                        subWords.add(word)
+                        subBaseChars += wordChars
+
+                        val remainingAfterCurrent = clause.words.size - (localIdx + 1)
+                        val reachedLimit = subWords.size >= maxWordsPerPhrase || subBaseChars >= maxBaseCharsPerPhrase
+
+                        // Never break if current word is a preposition/particle or if only 1..2 words remain in the clause
+                        if (reachedLimit && remainingAfterCurrent >= 3 && !isNonBreakableEndingWord(word)) {
+                            groups.add(
+                                RawPhraseGroup(
+                                    words = subWords.toMutableList(),
+                                    startWord1Based = subStartWord1Based,
+                                    endWord1Based = globalWord1Based
+                                )
+                            )
+                            subWords = mutableListOf()
+                            subBaseChars = 0
+                        }
+                    }
+
+                    if (subWords.isNotEmpty()) {
+                        if (subWords.size <= 2 && groups.isNotEmpty()) {
+                            val prev = groups.last()
+                            prev.words.addAll(subWords)
+                            prev.endWord1Based = clause.endWord1Based
+                        } else {
+                            groups.add(
+                                RawPhraseGroup(
+                                    words = subWords.toMutableList(),
+                                    startWord1Based = subStartWord1Based,
+                                    endWord1Based = clause.endWord1Based
+                                )
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -282,86 +431,86 @@ object QuranTextAndLayoutEngine {
             groups.last().words.add(ayahSymbol)
         }
 
-        val totalDurationMs = max(1200L, segment?.durationMs ?: (groups.size * 2800L))
-        val wordTimings = segment?.wordTimings.orEmpty().sortedBy { it.wordIndex }
+        val totalDurationMs = max(1200L, segment?.durationMs ?: (groups.size * 3200L))
+        val speechStartMs = (segment?.speechStartMs ?: 0L).coerceIn(0L, max(0L, totalDurationMs - 300L))
+        val speechEndMs = (segment?.speechEndMs ?: totalDurationMs).coerceIn(speechStartMs + 250L, totalDurationMs)
+
+        // Ensure we have calibrated word timings for every word in mergedTokens
+        val rawTimings = segment?.wordTimings.orEmpty().sortedBy { it.wordIndex }
+        val effectiveWordTimings = if (rawTimings.size == mergedTokens.size && rawTimings.last().endTimeMs > rawTimings.first().startTimeMs) {
+            rawTimings
+        } else if (rawTimings.size >= 2 && rawTimings.last().endTimeMs > rawTimings.first().startTimeMs) {
+            // Re-calibrate existing wordTimings onto mergedTokens count
+            com.example.data.AudioDownloadManager.buildCalibratedWordTimings(
+                surahNumber = verse.surahNumber,
+                verseNumber = verse.verseNumber,
+                verseWords = mergedTokens,
+                totalDurationMs = totalDurationMs,
+                envelope = com.example.data.AcousticSpeechEnvelope(
+                    speechStartMs = speechStartMs,
+                    speechEndMs = speechEndMs,
+                    pauseMidpointsMs = segment?.acousticPauseWindowsMs.orEmpty(),
+                    containsLeadingBasmalaAudio = segment?.containsLeadingBasmalaAudio == true
+                ),
+                rawApiTimings = rawTimings
+            )
+        } else {
+            // Generate phonetic + acoustic pause forced-aligned word timings across [speechStartMs..speechEndMs]
+            com.example.data.AudioDownloadManager.buildCalibratedWordTimings(
+                surahNumber = verse.surahNumber,
+                verseNumber = verse.verseNumber,
+                verseWords = mergedTokens,
+                totalDurationMs = totalDurationMs,
+                envelope = com.example.data.AcousticSpeechEnvelope(
+                    speechStartMs = speechStartMs,
+                    speechEndMs = speechEndMs,
+                    pauseMidpointsMs = segment?.acousticPauseWindowsMs.orEmpty(),
+                    containsLeadingBasmalaAudio = segment?.containsLeadingBasmalaAudio == true
+                ),
+                rawApiTimings = emptyList()
+            )
+        }
 
         val totalGroups = groups.size
         val slices = mutableListOf<PhraseSlice>()
 
-        // Check if wordTimings cover the verse reliably
-        val hasValidWordTimings = wordTimings.size >= 2 &&
-            wordTimings.last().endMs > wordTimings.first().startMs
+        // Compute each phrase's exact startMs from the first word of that phrase,
+        // and keep the current phrase visible until the reciter starts the first word of the NEXT phrase!
+        val phraseOnsetTimesMs = LongArray(totalGroups)
+        for (index in 0 until totalGroups) {
+            if (index == 0) {
+                phraseOnsetTimesMs[index] = 0L
+            } else {
+                val firstWordIdx = groups[index].startWord1Based
+                val matchingFirstWord = effectiveWordTimings.find { it.wordIndex == firstWordIdx }
+                    ?: effectiveWordTimings.getOrNull((firstWordIdx - 1).coerceIn(0, effectiveWordTimings.lastIndex))
+                val prevOnset = phraseOnsetTimesMs[index - 1]
+                phraseOnsetTimesMs[index] = (matchingFirstWord?.startTimeMs ?: (prevOnset + 400L))
+                    .coerceIn(prevOnset + 250L, totalDurationMs - (totalGroups - index) * 200L)
+            }
+        }
 
-        if (hasValidWordTimings) {
-            var previousEndMs = 0L
-            groups.forEachIndexed { index, group ->
-                val matchingTimings = wordTimings.filter {
-                    it.wordIndex in group.startWord1Based..group.endWord1Based
-                }
-                val startMs = if (index == 0) {
-                    0L
-                } else {
-                    matchingTimings.firstOrNull()?.startMs?.coerceAtLeast(previousEndMs) ?: previousEndMs
-                }
-                val rawEndMs = if (index == groups.lastIndex) {
-                    totalDurationMs
-                } else {
-                    matchingTimings.lastOrNull()?.endMs ?: (startMs + (totalDurationMs - startMs) / (totalGroups - index))
-                }
-                val endMs = rawEndMs.coerceIn(startMs + 250L, totalDurationMs)
-                previousEndMs = endMs
+        for (index in 0 until totalGroups) {
+            val group = groups[index]
+            val startMs = phraseOnsetTimesMs[index]
+            val endMs = if (index == totalGroups - 1) {
+                totalDurationMs
+            } else {
+                phraseOnsetTimesMs[index + 1]
+            }
 
-                slices.add(
-                    PhraseSlice(
-                        phraseIndex = index,
-                        totalPhrases = totalGroups,
-                        text = group.words.joinToString(" "),
-                        words = group.words,
-                        startWordIndex1Based = group.startWord1Based,
-                        endWordIndex1Based = group.endWord1Based,
-                        startMs = startMs,
-                        endMs = if (index == groups.lastIndex) totalDurationMs else endMs
-                    )
+            slices.add(
+                PhraseSlice(
+                    phraseIndex = index,
+                    totalPhrases = totalGroups,
+                    text = group.words.joinToString(" "),
+                    words = group.words,
+                    startWordIndex1Based = group.startWord1Based,
+                    endWordIndex1Based = group.endWord1Based,
+                    startMs = startMs,
+                    endMs = endMs
                 )
-            }
-        } else {
-            // Proportional timing by character weight (base letters + elongation marks)
-            val weights = groups.map { group ->
-                val textJoined = group.words.joinToString(" ")
-                val baseWeight = textJoined.count { !isQuranicDiacritic(it) }.coerceAtLeast(3)
-                val maddWeight = textJoined.count { it == '\u0653' || it == '\u0670' || it == 'ا' || it == 'و' || it == 'ي' }
-                (baseWeight + maddWeight * 0.6f).coerceAtLeast(4f)
-            }
-            val totalWeight = weights.sum().coerceAtLeast(1f)
-            var accumulatedMs = 0L
-
-            groups.forEachIndexed { index, group ->
-                val startMs = accumulatedMs
-                val sliceDuration = if (index == groups.lastIndex) {
-                    totalDurationMs - startMs
-                } else {
-                    ((weights[index] / totalWeight) * totalDurationMs).toLong().coerceAtLeast(400L)
-                }
-                val endMs = if (index == groups.lastIndex) {
-                    totalDurationMs
-                } else {
-                    (startMs + sliceDuration).coerceAtMost(totalDurationMs - 200L)
-                }
-                accumulatedMs = endMs
-
-                slices.add(
-                    PhraseSlice(
-                        phraseIndex = index,
-                        totalPhrases = totalGroups,
-                        text = group.words.joinToString(" "),
-                        words = group.words,
-                        startWordIndex1Based = group.startWord1Based,
-                        endWordIndex1Based = group.endWord1Based,
-                        startMs = startMs,
-                        endMs = endMs
-                    )
-                )
-            }
+            )
         }
 
         return slices
@@ -369,7 +518,7 @@ object QuranTextAndLayoutEngine {
 
     /**
      * Resolves the currently active phrase and its transition state at [localVerseTimeMs]
-     * within the given [verse] and [segment].
+     * within the given [verse] and [segment], driven strictly by the audio playback clock.
      */
     fun resolveActivePhraseAtTime(
         verse: QuranVerse,
@@ -384,12 +533,12 @@ object QuranTextAndLayoutEngine {
         val slices = if (singleLineMode) {
             segmentVerseIntoSingleLinePhrases(verse, segment)
         } else {
-            // Even when singleLineMode is disabled, split ultra-long verses (> 18 words) into readable pages so they never truncate
+            // Even when singleLineMode is disabled, split ultra-long verses (> 16 words) into readable pages so they never truncate
             segmentVerseIntoSingleLinePhrases(
                 verse = verse,
                 segment = segment,
-                maxWordsPerPhrase = 14,
-                maxBaseCharsPerPhrase = 95
+                maxWordsPerPhrase = 16,
+                maxBaseCharsPerPhrase = 105
             )
         }
 
@@ -401,10 +550,17 @@ object QuranTextAndLayoutEngine {
         val phraseDurationMs = max(350L, currentSlice.endMs - currentSlice.startMs)
         val localPhraseTimeMs = (clampedVerseTimeMs - currentSlice.startMs).coerceIn(0L, phraseDurationMs)
 
-        // Determine active word index inside currentSlice
+        // Determine active word index inside currentSlice using word-level timings when available
         val wordCount = currentSlice.words.size.coerceAtLeast(1)
-        val progressInPhrase = (localPhraseTimeMs.toFloat() / phraseDurationMs.toFloat()).coerceIn(0f, 0.999f)
-        val activeWordInPhrase = (progressInPhrase * wordCount).toInt().coerceIn(0, wordCount - 1)
+        val wordTimings = segment?.wordTimings.orEmpty()
+        val activeWordInPhrase = if (wordTimings.isNotEmpty()) {
+            val activeGlobalWord = wordTimings.lastOrNull { clampedVerseTimeMs >= it.startTimeMs }?.wordIndex
+                ?: currentSlice.startWordIndex1Based
+            (activeGlobalWord - currentSlice.startWordIndex1Based).coerceIn(0, wordCount - 1)
+        } else {
+            val progressInPhrase = (localPhraseTimeMs.toFloat() / phraseDurationMs.toFloat()).coerceIn(0f, 0.999f)
+            (progressInPhrase * wordCount).toInt().coerceIn(0, wordCount - 1)
+        }
 
         val transitionState = computeTransitionFrameState(
             transitionConfig = transitionConfig,

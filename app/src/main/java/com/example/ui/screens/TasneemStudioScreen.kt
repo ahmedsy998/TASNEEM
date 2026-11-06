@@ -41,6 +41,7 @@ import com.example.media.PlaybackSyncState
 import com.example.ui.components.ArabicFontsCollapsibleGroup
 import com.example.ui.components.BackgroundMediaLibraryCollapsibleGroup
 import com.example.ui.components.CuratedBackgroundLibraryDialog
+import com.example.ui.components.MadinahMushafSettingsCollapsibleGroup
 import com.example.ui.components.PersistentLivePreviewPanel
 import com.example.ui.components.PersonalSignatureCollapsibleGroup
 import com.example.ui.components.QuranTextStylingCollapsibleGroup
@@ -61,7 +62,7 @@ import com.example.viewmodel.TasneemViewModel
 /**
  * Tasneem Quranic Video Creation Studio Screen (Requirements 01..14).
  * Enforces a FIXED Persistent Live Preview ("البث الحي") at the top of the screen while
- * all 12 collapsible editing groups scroll smoothly underneath it.
+ * all collapsible editing groups scroll smoothly underneath it.
  */
 @Composable
 fun TasneemStudioScreen(
@@ -99,11 +100,10 @@ fun TasneemStudioScreen(
         }
     }
 
-    // Requirement 13: 12 Collapsible Groups
-    // The first essential groups ("القارئ والتلاوة" and "اختيار السورة والآيات") open by default,
-    // and Group 12 ("إعدادات الفيديو والجودة والتصدير") is also easy to access.
+    // Collapsible Studio Groups (including dedicated Madinah Mushaf group 0)
     val expandedGroups = remember {
         mutableStateMapOf(
+            0 to false, // إعدادات المصحف (مصحف المدينة النبوية — رواية حفص عن عاصم)
             1 to true,  // القارئ والتلاوة
             2 to true,  // اختيار السورة والآيات
             3 to false, // إعدادات معلومات التلاوة
@@ -160,7 +160,7 @@ fun TasneemStudioScreen(
             }
         )
 
-        // 2. SCROLLABLE 12 COLLAPSIBLE STUDIO GROUPS BELOW THE FIXED LIVE PREVIEW
+        // 2. SCROLLABLE COLLAPSIBLE STUDIO GROUPS BELOW THE FIXED LIVE PREVIEW
         if (!isFullscreen) {
             val scrollState = rememberScrollState()
             val totalSelectedVerses = (uiState.endVerse - uiState.startVerse + 1).coerceAtLeast(1)
@@ -181,11 +181,11 @@ fun TasneemStudioScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "أقسام إعدادات الاستوديو (١٢ قسمًا)",
+                        text = "أقسام إعدادات الاستوديو والمصحف",
                         style = MaterialTheme.typography.labelLarge,
                         color = colors.textSecondary
                     )
-                    val allExpanded = (1..12).all { expandedGroups[it] == true }
+                    val allExpanded = (0..12).all { expandedGroups[it] == true }
                     Surface(
                         shape = RoundedCornerShape(50),
                         color = colors.elevatedSurface,
@@ -194,7 +194,7 @@ fun TasneemStudioScreen(
                             .clip(RoundedCornerShape(50))
                             .clickable {
                                 val target = !allExpanded
-                                for (i in 1..12) expandedGroups[i] = target
+                                for (i in 0..12) expandedGroups[i] = target
                             }
                             .testTag("toggle_all_collapsible_groups_button")
                     ) {
@@ -240,6 +240,16 @@ fun TasneemStudioScreen(
                     onOpenSurahModal = { viewModel.setSurahSelectorVisible(true) },
                     onUpdateVerseRange = viewModel::updateVerseRange,
                     onResetVerseRange = viewModel::resetVerseRange
+                )
+
+                // Dedicated Madinah Mushaf Section ("إعدادات المصحف" — Section 04)
+                MadinahMushafSettingsCollapsibleGroup(
+                    expanded = isGroupExpanded(0),
+                    onToggleExpanded = { toggleGroup(0) },
+                    mushafConfig = uiState.mushafConfig,
+                    onSelectBasmalaRuleMode = viewModel::updateMushafBasmalaRuleMode,
+                    onToggleWaqfSymbols = viewModel::toggleMushafWaqfSymbols,
+                    onResetMushafConfig = viewModel::resetMushafConfig
                 )
 
                 // Group 3: إعدادات معلومات التلاوة (Recitation Information Header)

@@ -190,12 +190,15 @@ class QuranSynchronizationEngine(
         _previewReciterId.value = null
     }
 
+    private var lastLoggedVerse: Int = -1
+    private var lastLoggedWord: Int = -1
+
     private fun startSyncTicker() {
         tickerJob?.cancel()
         tickerJob = coroutineScope.launch(Dispatchers.Main) {
             while (isActive && exoPlayer.isPlaying) {
                 updateSyncState()
-                delay(40L) // 25fps smooth synchronization updates
+                delay(16L) // ~60fps high-precision audio clock synchronization
             }
         }
     }
@@ -209,15 +212,31 @@ class QuranSynchronizationEngine(
         if (loadedSegments.isEmpty()) return
         val itemIdx = exoPlayer.currentMediaItemIndex.coerceIn(0, loadedSegments.size - 1)
         val seg = loadedSegments[itemIdx]
-        val localPos = exoPlayer.currentPosition.coerceIn(0L, seg.durationMs)
-        val overallPos = (seg.startOffsetMs + localPos).coerceAtMost(
+        val liveDuration = exoPlayer.duration.takeIf { it > 200L } ?: seg.durationMs
+        val localPos = exoPlayer.currentPosition.coerceIn(0L, liveDuration)
+        val overallPos = (seg.startOffsetMs + localPos.coerceAtMost(seg.durationMs)).coerceAtMost(
             loadedSegments.lastOrNull()?.endOffsetMs ?: 0L
         )
 
-        val activeWord = if (seg.wordTimings.isNotEmpty()) {
-            seg.wordTimings.find { localPos >= it.startMs && localPos <= it.endMs }?.wordIndex
+        val matchedWordTiming = if (seg.wordTimings.isNotEmpty()) {
+            seg.wordTimings.find { localPos >= it.startTimeMs && localPos <= it.endTimeMs }
+                ?: seg.wordTimings.lastOrNull { localPos >= it.startTimeMs }
         } else {
             null
+        }
+        val activeWord = matchedWordTiming?.wordIndex
+
+        if (seg.verseNumber != lastLoggedVerse || (activeWord != null && activeWord != lastLoggedWord)) {
+            lastLoggedVerse = seg.verseNumber
+            if (activeWord != null) lastLoggedWord = activeWord
+            android.util.Log.d(
+                "TasneemSync",
+                "AudioClock pos=${overallPos}ms (local=${localPos}ms/${seg.durationMs}ms) " +
+                    "Surah=${seg.surahNumber} Verse=${seg.verseNumber} " +
+                    "Word=${activeWord ?: -1} ('${matchedWordTiming?.wordText ?: ""}') " +
+                    "expected=[${matchedWordTiming?.startTimeMs ?: 0}..${matchedWordTiming?.endTimeMs ?: seg.durationMs}]ms " +
+                    "segBounds=[${seg.startOffsetMs}..${seg.endOffsetMs}]ms"
+            )
         }
 
         _syncState.value = PlaybackSyncState(

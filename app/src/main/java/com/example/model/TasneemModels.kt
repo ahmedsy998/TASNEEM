@@ -35,10 +35,25 @@ data class QuranVerse(
 )
 
 data class WordTiming(
+    val surahNumber: Int = 1,
+    val verseNumber: Int = 1,
     val wordIndex: Int, // 1-indexed word position in verse
-    val startMs: Long,
-    val endMs: Long
-)
+    val wordText: String = "",
+    val startTimeMs: Long,
+    val endTimeMs: Long
+) {
+    constructor(wordIndex: Int, startMs: Long, endMs: Long) : this(
+        surahNumber = 1,
+        verseNumber = 1,
+        wordIndex = wordIndex,
+        wordText = "",
+        startTimeMs = startMs,
+        endTimeMs = endMs
+    )
+
+    val startMs: Long get() = startTimeMs
+    val endMs: Long get() = endTimeMs
+}
 
 data class VerseAudioSegment(
     val surahNumber: Int,
@@ -49,7 +64,43 @@ data class VerseAudioSegment(
     val startOffsetMs: Long,
     val endOffsetMs: Long,
     val wordTimings: List<WordTiming> = emptyList(),
+    val speechStartMs: Long = 0L,
+    val speechEndMs: Long = durationMs,
+    val containsLeadingBasmalaAudio: Boolean = false,
+    val acousticPauseWindowsMs: List<Long> = emptyList(),
     val isVerified: Boolean = true
+)
+
+enum class MushafBasmalaRuleMode(
+    val id: String,
+    val titleAr: String,
+    val descriptionAr: String
+) {
+    MADINAH_MUSHAF_AUDIO_LOCKED(
+        id = "madinah_audio_locked",
+        titleAr = "مطابقة التلاوة الصوتية وأحكام مصحف المدينة",
+        descriptionAr = "الفاتحة (١:١ آية مستقلة) · التوبة (بلا بسملة) · النمل (٢٧:٣٠ جزء من الآية) · سائر السور (لا تُضاف للآية ١ إلا إذا نطقها القارئ في الملف الصوتي)"
+    ),
+    STRICT_VERSE_TEXT_ONLY(
+        id = "strict_verse_text_only",
+        titleAr = "النص القرآني الصافي للآية فقط",
+        descriptionAr = "عرض نص الآية المحقق فقط دون إضافة البسملة الافتتاحية في غير الفاتحة (١:١) والنمل (٢٧:٣٠)"
+    )
+}
+
+/**
+ * Madinah Mushaf Configuration (Section 04 — "إعدادات المصحف").
+ * Default Edition: مصحف المدينة النبوية — مجمع الملك فهد لطباعة المصحف الشريف
+ * Default Narration: رواية حفص عن عاصم
+ */
+data class MushafEditionConfig(
+    val editionNameAr: String = "مصحف المدينة النبوية — مجمع الملك فهد لطباعة المصحف الشريف",
+    val narrationNameAr: String = "رواية حفص عن عاصم",
+    val scriptNameAr: String = "الرسم العثماني الموافق لمصحف المدينة النبوية",
+    val numberingSystemAr: String = "العد الكوفي المعتمد في مصحف المدينة النبوية (٦٢٣٦ آية)",
+    val basmalaRuleMode: MushafBasmalaRuleMode = MushafBasmalaRuleMode.MADINAH_MUSHAF_AUDIO_LOCKED,
+    val preserveUthmanicOrthography: Boolean = true,
+    val showQuranicWaqfSymbols: Boolean = true
 )
 
 data class ReciterInfo(

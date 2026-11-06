@@ -24,6 +24,8 @@ import com.example.model.AudioDownloadState
 import com.example.model.CuratedBackgroundMediaItem
 import com.example.model.HeaderElementConfig
 import com.example.model.MediaCropMode
+import com.example.model.MushafBasmalaRuleMode
+import com.example.model.MushafEditionConfig
 import com.example.model.PhoneMediaBackground
 import com.example.model.QuranTextAlignment
 import com.example.model.QuranTextStyleConfig
@@ -66,6 +68,7 @@ data class StudioUiState(
     val showSurahSelectorModal: Boolean = false,
     val showCuratedLibraryModal: Boolean = false,
     val isDownloadingCuratedMedia: Boolean = false,
+    val mushafConfig: MushafEditionConfig = MushafEditionConfig(),
     val selectedSurah: SurahInfo = SurahInfo(112, "الإخلاص", 4, "مكية"),
     val startVerse: Int = 1,
     val endVerse: Int = 4,
@@ -271,6 +274,27 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // ==================================================
+    // Madinah Mushaf Settings (Section 04 — "إعدادات المصحف")
+    // ==================================================
+    fun updateMushafBasmalaRuleMode(mode: MushafBasmalaRuleMode) {
+        _uiState.update {
+            it.copy(mushafConfig = it.mushafConfig.copy(basmalaRuleMode = mode))
+        }
+    }
+
+    fun toggleMushafWaqfSymbols(enabled: Boolean) {
+        _uiState.update {
+            it.copy(mushafConfig = it.mushafConfig.copy(showQuranicWaqfSymbols = enabled))
+        }
+    }
+
+    fun resetMushafConfig() {
+        _uiState.update {
+            it.copy(mushafConfig = MushafEditionConfig())
+        }
+    }
+
+    // ==================================================
     // Reciter Selection & Exact Selected-Verse Audio Download
     // ==================================================
     fun selectReciter(reciter: ReciterInfo) {
@@ -309,13 +333,15 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
         syncEngine.resetPlayback()
 
         downloadJob = viewModelScope.launch {
-            if (state.selectedVerses.isEmpty()) {
+            var currentVerses = state.selectedVerses
+            if (currentVerses.isEmpty()) {
                 val res = quranRepository.getSelectedVerses(
                     state.selectedSurah.number,
                     state.startVerse,
                     state.endVerse
                 )
                 res.onSuccess { verses ->
+                    currentVerses = verses
                     _uiState.update { it.copy(selectedVerses = verses) }
                 }
             }
@@ -324,7 +350,8 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
                 reciter = state.selectedReciter,
                 surahNumber = state.selectedSurah.number,
                 startVerse = state.startVerse,
-                endVerse = state.endVerse
+                endVerse = state.endVerse,
+                verses = currentVerses
             ).collect { dlState ->
                 _uiState.update { it.copy(audioDownloadState = dlState) }
                 if (dlState is AudioDownloadState.Ready) {

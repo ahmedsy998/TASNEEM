@@ -150,6 +150,8 @@ class Mp4VideoRenderEngine(
             val bufferInfo = MediaCodec.BufferInfo()
             var cachedVideoFrameBitmap: Bitmap? = null
             var lastSampledVideoBucket = -1L
+            var lastLoggedExportVerse = -1
+            var lastLoggedExportPhraseIdx = -1
 
             for (frameIdx in 0..totalFrames) {
                 currentCoroutineContext().ensureActive()
@@ -165,6 +167,26 @@ class Mp4VideoRenderEngine(
                 val activeVerse = verses.find { it.verseNumber == activeSegment.verseNumber }
                     ?: verses.getOrElse(activeSegmentIdx) { verses.last() }
                 val localVerseTimeMs = (currentMs - activeSegment.startOffsetMs).coerceAtLeast(0L)
+
+                val activePhraseState = QuranTextAndLayoutEngine.resolveActivePhraseAtTime(
+                    verse = activeVerse,
+                    segment = activeSegment,
+                    localVerseTimeMs = localVerseTimeMs,
+                    singleLineMode = textStyleConfig.singleLineDisplay,
+                    transitionConfig = transitionConfig
+                )
+                if (activeVerse.verseNumber != lastLoggedExportVerse || activePhraseState.currentSlice.phraseIndex != lastLoggedExportPhraseIdx) {
+                    lastLoggedExportVerse = activeVerse.verseNumber
+                    lastLoggedExportPhraseIdx = activePhraseState.currentSlice.phraseIndex
+                    android.util.Log.d(
+                        "TasneemSync",
+                        "MP4ExportFrame frame=$frameIdx ptsUs=$presentationTimeUs (${currentMs}ms) " +
+                            "Surah=${activeVerse.surahNumber} Verse=${activeVerse.verseNumber} " +
+                            "phrase=${activePhraseState.currentSlice.phraseIndex + 1}/${activePhraseState.currentSlice.totalPhrases} " +
+                            "text='${activePhraseState.currentSlice.text}' " +
+                            "expectedLocal=[${activePhraseState.currentSlice.startMs}..${activePhraseState.currentSlice.endMs}]ms"
+                    )
+                }
 
                 // Determine background bitmap for currentMs (looping or trimming video background if applicable)
                 val frameBgBitmap: Bitmap? = if (mediaBackground.isVideo && videoBgRetriever != null) {
@@ -381,6 +403,8 @@ class Mp4VideoRenderEngine(
     /**
      * Decodes all selected verse MP3 files in order into raw PCM and encodes them into a single
      * continuous AAC stream (audio/mp4a-latm) covering 100% of the selected verses' audio duration.
+     * Aligns each verse's PCM byte length to its exact [VerseAudioSegment.durationMs] so that
+     * every verse starts at [VerseAudioSegment.startOffsetMs] with zero cumulative drift.
      */
     private fun buildCompleteAacAudioStream(
         segments: List<VerseAudioSegment>,
@@ -388,20 +412,41 @@ class Mp4VideoRenderEngine(
     ): AudioTrackBundle {
         val targetSampleRate = 44100
         val targetChannelCount = 1
+        val bytesPerSecond = targetSampleRate * targetChannelCount * 2 // 16-bit PCM
         val pcmStream = ByteArrayOutputStream()
 
         for (seg in segments) {
+            val expectedSegBytes = (((seg.durationMs * bytesPerSecond) / 1000L).toInt()) and 0xFFFFFFFE.toInt()
             val file = File(seg.localFilePath)
-            if (!file.exists()) continue
-            val decodedBytes = decodeMp3ToMono44100Pcm(file, seg.durationMs)
-            if (decodedBytes.isNotEmpty()) {
-                pcmStream.write(decodedBytes)
+            val decodedBytes = if (file.exists()) {
+                decodeMp3ToMono44100Pcm(file, seg.durationMs)
+            } else {
+                ByteArray(expectedSegBytes)
+            }
+
+            val evenDecodedSize = decodedBytes.size and 0xFFFFFFFE.toInt()
+            when {
+                evenDecodedSize == expectedSegBytes && evenDecodedSize > 0 -> {
+                    pcmStream.write(decodedBytes, 0, evenDecodedSize)
+                }
+                evenDecodedSize > expectedSegBytes && expectedSegBytes > 0 -> {
+                    pcmStream.write(decodedBytes, 0, expectedSegBytes)
+                }
+                evenDecodedSize > 0 -> {
+                    pcmStream.write(decodedBytes, 0, evenDecodedSize)
+                    val padBytes = (expectedSegBytes - evenDecodedSize).coerceAtLeast(0)
+                    if (padBytes > 0) {
+                        pcmStream.write(ByteArray(padBytes))
+                    }
+                }
+                expectedSegBytes > 0 -> {
+                    pcmStream.write(ByteArray(expectedSegBytes))
+                }
             }
         }
 
         // Ensure PCM length matches at least totalExpectedDurationMs so audio never truncates early
-        val bytesPerSecond = targetSampleRate * targetChannelCount * 2 // 16-bit PCM
-        val minExpectedBytes = ((totalExpectedDurationMs * bytesPerSecond) / 1000L).toInt()
+        val minExpectedBytes = (((totalExpectedDurationMs * bytesPerSecond) / 1000L).toInt()) and 0xFFFFFFFE.toInt()
         if (pcmStream.size() < minExpectedBytes) {
             val padCount = minExpectedBytes - pcmStream.size()
             pcmStream.write(ByteArray(padCount))

@@ -266,8 +266,9 @@ class VideoFrameCanvasRenderer(private val context: Context) {
         val mainColorWithAlpha = applyAlpha(rawMainColor, alphaMultiplier)
         val tashkeelColorWithAlpha = applyAlpha(rawTashkeelColor, alphaMultiplier)
 
-        val maxTextWidthPx = (frameWidth * 0.88f).toInt().coerceAtLeast(180)
-        var targetTextSizePx = (textConfig.fontSizeSp * 2.65f * scaleFactor).coerceIn(22f, 150f)
+        val maxTextWidthPx = (frameWidth * 0.90f).toInt().coerceAtLeast(64)
+        var targetTextSizePx = (textConfig.fontSizeSp * 2.65f * scaleFactor)
+            .coerceIn(10f * scaleFactor, 155f * scaleFactor)
 
         // Prepare display text (respecting Type-on Reveal visibleWordCount if active)
         val words = phraseRenderState.currentSlice.words
@@ -291,14 +292,26 @@ class VideoFrameCanvasRenderer(private val context: Context) {
             }
         }
 
-        // Requirement 09: In singleLineDisplay mode, ensure the phrase fits comfortably on ONE single line
+        // Section 07: In singleLineDisplay mode, measure the full rendered Uthmani phrase + verse symbol
+        // in the exact scaled coordinate space so Live Preview and 1080p/720p export fit 100% identically
+        // without wrapping or clipping the final word or verse number symbol.
+        var measuredFullWidthPx = if (fullMeasureText.isNotEmpty()) {
+            max(
+                verseTextPaint.measureText(fullMeasureText),
+                Layout.getDesiredWidth(fullMeasureText, verseTextPaint)
+            )
+        } else 0f
+
         if (textConfig.singleLineDisplay && fullMeasureText.isNotEmpty()) {
-            var measuredW = verseTextPaint.measureText(fullMeasureText)
-            val minAllowedPx = (18f * 2.2f * scaleFactor).coerceAtLeast(18f)
-            while (measuredW > maxTextWidthPx * 0.96f && targetTextSizePx > minAllowedPx) {
-                targetTextSizePx *= 0.93f
+            val minAllowedPx = (12f * 2.2f * scaleFactor).coerceAtLeast(6f)
+            val safeTargetWidthPx = maxTextWidthPx * 0.94f
+            while (measuredFullWidthPx > safeTargetWidthPx && targetTextSizePx > minAllowedPx) {
+                targetTextSizePx *= 0.94f
                 verseTextPaint.textSize = targetTextSizePx
-                measuredW = verseTextPaint.measureText(fullMeasureText)
+                measuredFullWidthPx = max(
+                    verseTextPaint.measureText(fullMeasureText),
+                    Layout.getDesiredWidth(fullMeasureText, verseTextPaint)
+                )
             }
         }
 
@@ -316,8 +329,17 @@ class VideoFrameCanvasRenderer(private val context: Context) {
             QuranTextAlignment.LEFT -> Layout.Alignment.ALIGN_OPPOSITE
         }
 
+        // Guarantee StaticLayout container width has headroom above desired width in single-line mode
+        // so HarfBuzz RTL ligatures and ornate verse numbers never wrap onto a truncated 2nd line
+        val desiredSpannableWidth = Layout.getDesiredWidth(spannablePhrase, verseTextPaint)
+        val verseLayoutWidthPx = if (textConfig.singleLineDisplay) {
+            max(maxTextWidthPx, kotlin.math.ceil(max(measuredFullWidthPx, desiredSpannableWidth) + 28f * scaleFactor).toInt())
+        } else {
+            maxTextWidthPx
+        }
+
         val verseLayout = StaticLayout.Builder
-            .obtain(spannablePhrase, 0, spannablePhrase.length, verseTextPaint, maxTextWidthPx)
+            .obtain(spannablePhrase, 0, spannablePhrase.length, verseTextPaint, verseLayoutWidthPx)
             .setAlignment(layoutAlignment)
             .setTextDirection(TextDirectionHeuristics.RTL)
             .setLineSpacing(0f, textConfig.lineSpacingMultiplier.coerceIn(1.1f, 2.4f))
@@ -333,14 +355,28 @@ class VideoFrameCanvasRenderer(private val context: Context) {
                 color = applyAlpha(rawMainColor, prevAlpha)
                 setShadowLayer(6f * scaleFactor, 0f, 2f * scaleFactor, Color.argb((140 * prevAlpha).toInt(), 0, 0, 0))
             }
+            if (textConfig.singleLineDisplay && prevSlice.text.isNotEmpty()) {
+                var prevW = max(prevPaint.measureText(prevSlice.text), Layout.getDesiredWidth(prevSlice.text, prevPaint))
+                val minPrevPx = (12f * 2.2f * scaleFactor).coerceAtLeast(6f)
+                while (prevW > maxTextWidthPx * 0.94f && prevPaint.textSize > minPrevPx) {
+                    prevPaint.textSize *= 0.94f
+                    prevW = max(prevPaint.measureText(prevSlice.text), Layout.getDesiredWidth(prevSlice.text, prevPaint))
+                }
+            }
             val prevSpannable = QuranTextAndLayoutEngine.buildQuranSpannable(
                 text = prevSlice.text,
                 mainColorInt = applyAlpha(rawMainColor, prevAlpha),
                 enableIndependentTashkeel = textConfig.enableIndependentTashkeelColor,
                 tashkeelColorInt = applyAlpha(rawTashkeelColor, prevAlpha)
             )
+            val prevDesiredW = Layout.getDesiredWidth(prevSpannable, prevPaint)
+            val prevLayoutWidthPx = if (textConfig.singleLineDisplay) {
+                max(maxTextWidthPx, kotlin.math.ceil(prevDesiredW + 28f * scaleFactor).toInt())
+            } else {
+                maxTextWidthPx
+            }
             StaticLayout.Builder
-                .obtain(prevSpannable, 0, prevSpannable.length, prevPaint, maxTextWidthPx)
+                .obtain(prevSpannable, 0, prevSpannable.length, prevPaint, prevLayoutWidthPx)
                 .setAlignment(layoutAlignment)
                 .setTextDirection(TextDirectionHeuristics.RTL)
                 .setMaxLines(if (textConfig.singleLineDisplay) 1 else 4)
@@ -352,7 +388,7 @@ class VideoFrameCanvasRenderer(private val context: Context) {
         val tafsirLayout = if (textConfig.showTafsir && activeVerse.tafsirMuyassar.isNotBlank()) {
             val tafsirPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                 typeface = uiTypeface
-                textSize = (targetTextSizePx * 0.54f).coerceAtLeast(16f * scaleFactor)
+                textSize = (targetTextSizePx * 0.54f).coerceAtLeast(12f * scaleFactor)
                 color = applyAlpha(Color.rgb(245, 241, 234), alphaMultiplier)
                 setShadowLayer(6f * scaleFactor, 0f, 2f * scaleFactor, Color.argb(180, 0, 0, 0))
             }
@@ -369,7 +405,7 @@ class VideoFrameCanvasRenderer(private val context: Context) {
             val transPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                 typeface = uiTypeface
                 textSize = (targetTextSizePx * textConfig.translationFontSizeScale.coerceIn(0.45f, 1.0f))
-                    .coerceAtLeast(15f * scaleFactor)
+                    .coerceAtLeast(11f * scaleFactor)
                 color = applyAlpha(Color.rgb(197, 200, 203), alphaMultiplier)
                 setShadowLayer(6f * scaleFactor, 0f, 2f * scaleFactor, Color.argb(180, 0, 0, 0))
             }
@@ -401,7 +437,7 @@ class VideoFrameCanvasRenderer(private val context: Context) {
             val prevY = baseCenterY - prevLayout.height / 2f
             canvas.translate(prevX, prevY + prevLayout.height / 2f)
             canvas.scale(transition.previousScale, transition.previousScale)
-            canvas.translate(-maxTextWidthPx / 2f, -prevLayout.height / 2f)
+            canvas.translate(-prevLayout.width / 2f, -prevLayout.height / 2f)
             prevLayout.draw(canvas)
             canvas.restore()
         }
@@ -411,7 +447,7 @@ class VideoFrameCanvasRenderer(private val context: Context) {
         canvas.save()
         canvas.translate(animatedCenterX, cursorY + verseLayout.height / 2f)
         canvas.scale(transition.scale, transition.scale)
-        canvas.translate(-maxTextWidthPx / 2f, -verseLayout.height / 2f)
+        canvas.translate(-verseLayout.width / 2f, -verseLayout.height / 2f)
         verseLayout.draw(canvas)
         canvas.restore()
         cursorY += verseLayout.height
@@ -434,8 +470,8 @@ class VideoFrameCanvasRenderer(private val context: Context) {
             cursorY += translationLayout.height
         }
 
-        val hitWidth = min(maxTextWidthPx.toFloat(), verseTextPaint.measureText(fullMeasureText) + 64f * scaleFactor)
-            .coerceAtLeast(180f * scaleFactor)
+        val hitWidth = min(maxTextWidthPx.toFloat(), measuredFullWidthPx + 64f * scaleFactor)
+            .coerceAtLeast(140f * scaleFactor)
 
         return RectF(
             baseCenterX - hitWidth / 2f,

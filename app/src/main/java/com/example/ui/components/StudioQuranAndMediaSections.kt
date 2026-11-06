@@ -85,6 +85,8 @@ import com.example.model.ArabicQuranFont
 import com.example.model.AudioDownloadState
 import com.example.model.HeaderElementConfig
 import com.example.model.MediaCropMode
+import com.example.model.MushafBasmalaRuleMode
+import com.example.model.MushafEditionConfig
 import com.example.model.PhoneMediaBackground
 import com.example.model.QuranTextAlignment
 import com.example.model.RecitationHeaderConfig
@@ -557,6 +559,175 @@ fun SurahAndVerseSelectionCollapsibleGroup(
                     color = colors.textSecondary
                 )
             }
+        }
+    }
+}
+
+/**
+ * Dedicated Madinah Mushaf Section ("إعدادات المصحف") — Section 04.
+ * Default Edition: مصحف المدينة النبوية — مجمع الملك فهد لطباعة المصحف الشريف
+ * Default Narration: رواية حفص عن عاصم
+ */
+@Composable
+fun MadinahMushafSettingsCollapsibleGroup(
+    expanded: Boolean,
+    onToggleExpanded: () -> Unit,
+    mushafConfig: MushafEditionConfig,
+    onSelectBasmalaRuleMode: (MushafBasmalaRuleMode) -> Unit,
+    onToggleWaqfSymbols: (Boolean) -> Unit,
+    onResetMushafConfig: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = LocalTasneemColors.current
+
+    CollapsibleStudioGroupCard(
+        groupNumberAr = "م",
+        titleAr = "إعدادات المصحف",
+        subtitleAr = "${mushafConfig.editionNameAr} · ${mushafConfig.narrationNameAr}",
+        expanded = expanded,
+        onToggleExpanded = onToggleExpanded,
+        onResetGroup = onResetMushafConfig,
+        testTag = "collapsible_group_madinah_mushaf",
+        modifier = modifier
+    ) {
+        // 1. Official Edition & Narration Card
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = colors.elevatedSurface,
+            border = BorderStroke(1.dp, TasneemOrange.copy(alpha = 0.55f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MenuBook,
+                            contentDescription = null,
+                            tint = TasneemOrange,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "الطبعة والرواية المعتمدة",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = TasneemOrange
+                        )
+                    }
+                    SettingResetIconButton(
+                        contentDescription = "إعادة ضبط إعدادات المصحف",
+                        onReset = onResetMushafConfig,
+                        testTag = "reset_mushaf_config_button"
+                    )
+                }
+
+                Text(
+                    text = mushafConfig.editionNameAr,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = colors.textPrimary
+                )
+
+                Text(
+                    text = "الرواية: ${mushafConfig.narrationNameAr}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TasneemSoftIvory
+                )
+
+                Text(
+                    text = "• الرسم القرآني: ${mushafConfig.scriptNameAr}\n" +
+                        "• نظام العد والترقيم: ${mushafConfig.numberingSystemAr}\n" +
+                        "• هيكل السور: ١١٤ سورة كاملة بعدد آياتها المحقق في مصحف المدينة\n" +
+                        "• الضبط العثماني: حفظ الألف الخنجرية، همزة الوصل (ٱ)، علامات المد (ٓ)، السكون، الشدة، التنوين، وعلامات الوقف",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary
+                )
+            }
+        }
+
+        // 2. Basmala Handling Rules According to Madinah Mushaf & Audio Segments
+        Text(
+            text = "حكم البسملة ومطابقة التلاوة الصوتية",
+            style = MaterialTheme.typography.labelLarge,
+            color = colors.textSecondary
+        )
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            MushafBasmalaRuleMode.entries.forEach { mode ->
+                val isSelected = mushafConfig.basmalaRuleMode == mode
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isSelected) TasneemOrange.copy(alpha = 0.16f) else colors.elevatedSurface,
+                    border = BorderStroke(
+                        width = if (isSelected) 1.5.dp else 1.dp,
+                        color = if (isSelected) TasneemOrange else colors.borderSubtle
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onSelectBasmalaRuleMode(mode) }
+                        .testTag("mushaf_basmala_mode_${mode.id}")
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = mode.titleAr,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isSelected) TasneemOrange else colors.textPrimary
+                        )
+                        Text(
+                            text = mode.descriptionAr,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textSecondary
+                        )
+                    }
+                }
+            }
+        }
+
+        // 3. Quranic Waqf Symbols & Uthmanic Annotations Toggle
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "إظهار رموز الوقف والضبط المصحفي (ۖ ۗ ۚ)",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = colors.textPrimary
+                )
+                Text(
+                    text = "اعتماد مواضع الوقف الطبيعي في مصحف المدينة النبوية لتقسيم الآيات الطويلة دون بتر المعنى",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary
+                )
+            }
+            Switch(
+                checked = mushafConfig.showQuranicWaqfSymbols,
+                onCheckedChange = onToggleWaqfSymbols,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = TasneemDeepCharcoal,
+                    checkedTrackColor = TasneemOrange
+                ),
+                modifier = Modifier.testTag("mushaf_waqf_symbols_switch")
+            )
         }
     }
 }
