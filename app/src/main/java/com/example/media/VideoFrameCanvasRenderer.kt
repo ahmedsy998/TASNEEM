@@ -254,7 +254,6 @@ class VideoFrameCanvasRenderer(private val context: Context) {
         phraseRenderState: ActivePhraseRenderState,
         textConfig: QuranTextStyleConfig
     ): RectF {
-        val quranTypeface = textConfig.font.loadTypeface(context, textConfig.isBold)
         val uiTypeface = ArabicQuranFont.CAIRO.loadTypeface(context, bold = true)
 
         val transition = phraseRenderState.transitionState
@@ -280,8 +279,29 @@ class VideoFrameCanvasRenderer(private val context: Context) {
         val phraseText = visibleWords.joinToString(" ")
         val fullMeasureText = phraseRenderState.currentSlice.text
 
-        val verseTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            typeface = quranTypeface
+        // Resolve the active Typeface (built-in or custom imported TTF/OTF) + intelligent Quranic fallback
+        // and independent Tashkeel color spans (Sections 4, 6, 8, 9).
+        val resolvedTypography = com.example.data.QuranFontManager.resolvePhraseTypographyWithFallback(
+            context = context,
+            phraseText = phraseText,
+            textConfig = textConfig,
+            mainColorInt = mainColorWithAlpha,
+            tashkeelColorInt = tashkeelColorWithAlpha
+        )
+        val fullMeasureTypography = if (fullMeasureText == phraseText) {
+            resolvedTypography
+        } else {
+            com.example.data.QuranFontManager.resolvePhraseTypographyWithFallback(
+                context = context,
+                phraseText = fullMeasureText,
+                textConfig = textConfig,
+                mainColorInt = mainColorWithAlpha,
+                tashkeelColorInt = tashkeelColorWithAlpha
+            )
+        }
+
+        val verseTextPaint = TextPaint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+            typeface = resolvedTypography.effectiveBaseTypeface
             textSize = targetTextSizePx
             color = mainColorWithAlpha
             isFakeBoldText = textConfig.isBold
@@ -298,7 +318,7 @@ class VideoFrameCanvasRenderer(private val context: Context) {
         var measuredFullWidthPx = if (fullMeasureText.isNotEmpty()) {
             max(
                 verseTextPaint.measureText(fullMeasureText),
-                Layout.getDesiredWidth(fullMeasureText, verseTextPaint)
+                Layout.getDesiredWidth(fullMeasureTypography.spannable, verseTextPaint)
             )
         } else 0f
 
@@ -310,18 +330,12 @@ class VideoFrameCanvasRenderer(private val context: Context) {
                 verseTextPaint.textSize = targetTextSizePx
                 measuredFullWidthPx = max(
                     verseTextPaint.measureText(fullMeasureText),
-                    Layout.getDesiredWidth(fullMeasureText, verseTextPaint)
+                    Layout.getDesiredWidth(fullMeasureTypography.spannable, verseTextPaint)
                 )
             }
         }
 
-        // Build SpannableString with independent Tashkeel color (Requirement 03)
-        val spannablePhrase = QuranTextAndLayoutEngine.buildQuranSpannable(
-            text = phraseText,
-            mainColorInt = mainColorWithAlpha,
-            enableIndependentTashkeel = textConfig.enableIndependentTashkeelColor,
-            tashkeelColorInt = tashkeelColorWithAlpha
-        )
+        val spannablePhrase = resolvedTypography.spannable
 
         val layoutAlignment = when (textConfig.alignment) {
             QuranTextAlignment.CENTER -> Layout.Alignment.ALIGN_CENTER
@@ -338,50 +352,59 @@ class VideoFrameCanvasRenderer(private val context: Context) {
             maxTextWidthPx
         }
 
-        val verseLayout = StaticLayout.Builder
+        val verseLayoutBuilder = StaticLayout.Builder
             .obtain(spannablePhrase, 0, spannablePhrase.length, verseTextPaint, verseLayoutWidthPx)
             .setAlignment(layoutAlignment)
             .setTextDirection(TextDirectionHeuristics.RTL)
             .setLineSpacing(0f, textConfig.lineSpacingMultiplier.coerceIn(1.1f, 2.4f))
             .setMaxLines(if (textConfig.singleLineDisplay) 1 else 6)
             .setIncludePad(true)
-            .build()
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            verseLayoutBuilder.setUseLineSpacingFromFallbacks(true)
+        }
+        val verseLayout = verseLayoutBuilder.build()
 
         // Optional previous phrase crossfade/slide ghost during transition
         val prevSlice = phraseRenderState.previousSlice
         val prevLayout = if (prevSlice != null && transition.previousAlpha > 0.03f) {
             val prevAlpha = transition.previousAlpha.coerceIn(0f, 1f)
+            val prevTypography = com.example.data.QuranFontManager.resolvePhraseTypographyWithFallback(
+                context = context,
+                phraseText = prevSlice.text,
+                textConfig = textConfig,
+                mainColorInt = applyAlpha(rawMainColor, prevAlpha),
+                tashkeelColorInt = applyAlpha(rawTashkeelColor, prevAlpha)
+            )
             val prevPaint = TextPaint(verseTextPaint).apply {
+                typeface = prevTypography.effectiveBaseTypeface
                 color = applyAlpha(rawMainColor, prevAlpha)
                 setShadowLayer(6f * scaleFactor, 0f, 2f * scaleFactor, Color.argb((140 * prevAlpha).toInt(), 0, 0, 0))
             }
             if (textConfig.singleLineDisplay && prevSlice.text.isNotEmpty()) {
-                var prevW = max(prevPaint.measureText(prevSlice.text), Layout.getDesiredWidth(prevSlice.text, prevPaint))
+                var prevW = max(prevPaint.measureText(prevSlice.text), Layout.getDesiredWidth(prevTypography.spannable, prevPaint))
                 val minPrevPx = (12f * 2.2f * scaleFactor).coerceAtLeast(6f)
                 while (prevW > maxTextWidthPx * 0.94f && prevPaint.textSize > minPrevPx) {
                     prevPaint.textSize *= 0.94f
-                    prevW = max(prevPaint.measureText(prevSlice.text), Layout.getDesiredWidth(prevSlice.text, prevPaint))
+                    prevW = max(prevPaint.measureText(prevSlice.text), Layout.getDesiredWidth(prevTypography.spannable, prevPaint))
                 }
             }
-            val prevSpannable = QuranTextAndLayoutEngine.buildQuranSpannable(
-                text = prevSlice.text,
-                mainColorInt = applyAlpha(rawMainColor, prevAlpha),
-                enableIndependentTashkeel = textConfig.enableIndependentTashkeelColor,
-                tashkeelColorInt = applyAlpha(rawTashkeelColor, prevAlpha)
-            )
+            val prevSpannable = prevTypography.spannable
             val prevDesiredW = Layout.getDesiredWidth(prevSpannable, prevPaint)
             val prevLayoutWidthPx = if (textConfig.singleLineDisplay) {
                 max(maxTextWidthPx, kotlin.math.ceil(prevDesiredW + 28f * scaleFactor).toInt())
             } else {
                 maxTextWidthPx
             }
-            StaticLayout.Builder
+            val prevBuilder = StaticLayout.Builder
                 .obtain(prevSpannable, 0, prevSpannable.length, prevPaint, prevLayoutWidthPx)
                 .setAlignment(layoutAlignment)
                 .setTextDirection(TextDirectionHeuristics.RTL)
                 .setMaxLines(if (textConfig.singleLineDisplay) 1 else 4)
                 .setIncludePad(true)
-                .build()
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                prevBuilder.setUseLineSpacingFromFallbacks(true)
+            }
+            prevBuilder.build()
         } else null
 
         // Optional Tafsir / Translation layouts below the active line
@@ -398,6 +421,7 @@ class VideoFrameCanvasRenderer(private val context: Context) {
                 .setTextDirection(TextDirectionHeuristics.RTL)
                 .setLineSpacing(0f, 1.25f)
                 .setMaxLines(2)
+                .setIncludePad(true)
                 .build()
         } else null
 
@@ -414,11 +438,15 @@ class VideoFrameCanvasRenderer(private val context: Context) {
                 .setAlignment(Layout.Alignment.ALIGN_CENTER)
                 .setLineSpacing(0f, 1.2f)
                 .setMaxLines(2)
+                .setIncludePad(true)
                 .build()
         } else null
 
+        // Add vertical diacritic anti-clipping headroom (Section 4 & TEST 8) so tall upper marks
+        // (Shadda + Fatha, Maddah, Superscript Alef) and lower marks (Kasratan) are never clipped
+        val diacriticVerticalPadPx = max(14f * scaleFactor, targetTextSizePx * 0.28f)
         val spacingPx = 18f * scaleFactor
-        var totalBlockHeight = verseLayout.height.toFloat()
+        var totalBlockHeight = verseLayout.height.toFloat() + diacriticVerticalPadPx * 2f
         if (tafsirLayout != null) totalBlockHeight += spacingPx + tafsirLayout.height
         if (translationLayout != null) totalBlockHeight += spacingPx + translationLayout.height
 
@@ -442,15 +470,15 @@ class VideoFrameCanvasRenderer(private val context: Context) {
             canvas.restore()
         }
 
-        // Draw current active Quranic phrase with scale & transition
-        var cursorY = topY
+        // Draw current active Quranic phrase with scale, transition & vertical diacritic headroom
+        var cursorY = topY + diacriticVerticalPadPx
         canvas.save()
         canvas.translate(animatedCenterX, cursorY + verseLayout.height / 2f)
         canvas.scale(transition.scale, transition.scale)
         canvas.translate(-verseLayout.width / 2f, -verseLayout.height / 2f)
         verseLayout.draw(canvas)
         canvas.restore()
-        cursorY += verseLayout.height
+        cursorY += verseLayout.height + diacriticVerticalPadPx
 
         if (tafsirLayout != null) {
             cursorY += spacingPx

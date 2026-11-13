@@ -8,50 +8,95 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.example.R
 
+// 1. KFGQPC Uthmanic Script
 val KfgqpcUthmanicFontFamily = FontFamily(
     Font(R.font.kfgqpc_uthmanic, FontWeight.Normal),
     Font(R.font.kfgqpc_uthmanic, FontWeight.Bold)
 )
 
+// 2. Amiri Quran
 val AmiriQuranFontFamily = FontFamily(
     Font(R.font.amiri_quran, FontWeight.Normal),
     Font(R.font.amiri_quran, FontWeight.Bold)
 )
 
+// 3. Amiri
 val AmiriFontFamily = FontFamily(
     Font(R.font.amiri, FontWeight.Normal),
     Font(R.font.amiri, FontWeight.Bold)
 )
 
+// 4. Scheherazade New
 val ScheherazadeNewFontFamily = FontFamily(
     Font(R.font.scheherazade_new, FontWeight.Normal),
     Font(R.font.scheherazade_new, FontWeight.Bold)
 )
 
-val NotoNaskhArabicFontFamily = FontFamily(
-    Font(R.font.noto_naskh_arabic, FontWeight.Normal),
-    Font(R.font.noto_naskh_arabic, FontWeight.Bold)
-)
-
+// 5. Lateef
 val LateefFontFamily = FontFamily(
     Font(R.font.lateef, FontWeight.Normal),
     Font(R.font.lateef, FontWeight.Bold)
 )
 
+// 6. Noto Naskh Arabic
+val NotoNaskhArabicFontFamily = FontFamily(
+    Font(R.font.noto_naskh_arabic, FontWeight.Normal),
+    Font(R.font.noto_naskh_arabic, FontWeight.Bold)
+)
+
+// 7. Noto Naskh Arabic UI
+val NotoNaskhArabicUiFontFamily = FontFamily(
+    Font(R.font.noto_naskh_arabic_ui, FontWeight.Normal),
+    Font(R.font.noto_naskh_arabic_ui, FontWeight.Bold)
+)
+
+// 8. Markazi Text
+val MarkaziTextFontFamily = FontFamily(
+    Font(R.font.markazi_text, FontWeight.Normal),
+    Font(R.font.markazi_text, FontWeight.Bold)
+)
+
+// 9. Noto Sans Arabic
 val NotoSansArabicFontFamily = FontFamily(
     Font(R.font.noto_sans_arabic, FontWeight.Normal),
     Font(R.font.noto_sans_arabic, FontWeight.Bold)
 )
 
+// 10. Noto Sans Arabic UI
+val NotoSansArabicUiFontFamily = FontFamily(
+    Font(R.font.noto_sans_arabic_ui, FontWeight.Normal),
+    Font(R.font.noto_sans_arabic_ui, FontWeight.Bold)
+)
+
+// 11. Cairo
 val CairoFontFamily = FontFamily(
     Font(R.font.cairo, FontWeight.Normal),
     Font(R.font.cairo, FontWeight.Medium),
     Font(R.font.cairo, FontWeight.Bold)
 )
 
+// 12. IBM Plex Sans Arabic
 val IbmPlexSansArabicFontFamily = FontFamily(
     Font(R.font.ibm_plex_sans_arabic, FontWeight.Normal),
     Font(R.font.ibm_plex_sans_arabic, FontWeight.Bold)
+)
+
+// 13. Mada
+val MadaFontFamily = FontFamily(
+    Font(R.font.mada, FontWeight.Normal),
+    Font(R.font.mada, FontWeight.Bold)
+)
+
+// 14. Reem Kufi
+val ReemKufiFontFamily = FontFamily(
+    Font(R.font.reem_kufi, FontWeight.Normal),
+    Font(R.font.reem_kufi, FontWeight.Bold)
+)
+
+// 15. Aref Ruqaa
+val ArefRuqaaFontFamily = FontFamily(
+    Font(R.font.aref_ruqaa, FontWeight.Normal),
+    Font(R.font.aref_ruqaa, FontWeight.Bold)
 )
 
 val Typography = Typography(

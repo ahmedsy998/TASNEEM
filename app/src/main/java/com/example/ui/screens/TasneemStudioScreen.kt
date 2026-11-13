@@ -44,6 +44,7 @@ import com.example.ui.components.CuratedBackgroundLibraryDialog
 import com.example.ui.components.MadinahMushafSettingsCollapsibleGroup
 import com.example.ui.components.PersistentLivePreviewPanel
 import com.example.ui.components.PersonalSignatureCollapsibleGroup
+import com.example.ui.components.QuranFontValidationDialog
 import com.example.ui.components.QuranTextStylingCollapsibleGroup
 import com.example.ui.components.RecitationInfoHeaderCollapsibleGroup
 import com.example.ui.components.ReciterAndRecitationCollapsibleGroup
@@ -97,6 +98,15 @@ fun TasneemStudioScreen(
     ) { uri ->
         if (uri != null) {
             viewModel.onPhoneMediaPicked(uri, isVideo = true)
+        }
+    }
+
+    // Storage Access Framework (ACTION_OPEN_DOCUMENT) launcher for importing .TTF and .OTF fonts (Section 3)
+    val fontPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.onCustomFontPickedFromPhone(uri)
         }
     }
 
@@ -265,12 +275,32 @@ fun TasneemStudioScreen(
                     onResetReciterHeader = viewModel::resetReciterHeaderElement
                 )
 
-                // Group 4: الخطوط العربية (Arabic Fonts)
+                // Group 4: الخطوط العربية (Advanced Arabic & Quranic Font System - Sections 02..10)
                 ArabicFontsCollapsibleGroup(
                     expanded = isGroupExpanded(4),
                     onToggleExpanded = { toggleGroup(4) },
                     textStyle = uiState.textStyle,
+                    importedFonts = uiState.importedFonts,
+                    fontImportMessageAr = uiState.fontImportMessageAr,
+                    fontImportWarningAr = uiState.fontImportWarningAr,
                     onSelectFont = viewModel::updateArabicFont,
+                    onSelectImportedFont = viewModel::selectImportedFont,
+                    onDeleteImportedFont = viewModel::removeImportedFont,
+                    onImportFontFromPhone = {
+                        fontPickerLauncher.launch(
+                            arrayOf(
+                                "font/ttf",
+                                "font/otf",
+                                "application/x-font-ttf",
+                                "application/x-font-opentype",
+                                "application/font-sfnt",
+                                "application/octet-stream",
+                                "*/*"
+                            )
+                        )
+                    },
+                    onToggleQuranicFallback = viewModel::toggleQuranicFontFallback,
+                    onOpenValidationLab = { viewModel.setFontValidationModalVisible(true) },
                     onResetFont = viewModel::resetArabicFont
                 )
 
@@ -428,6 +458,17 @@ fun TasneemStudioScreen(
             isDownloading = uiState.isDownloadingCuratedMedia,
             onSelectItem = viewModel::selectCuratedBackgroundItem,
             onDismiss = { viewModel.setCuratedLibraryModalVisible(false) }
+        )
+    }
+
+    // Intelligent Quranic Font Validation Dialog (Sections 4, 5, 6)
+    val validationReport = uiState.activeFontValidationReport
+    if (uiState.showFontValidationModal && validationReport != null) {
+        QuranFontValidationDialog(
+            report = validationReport,
+            textStyle = uiState.textStyle,
+            onToggleFallback = viewModel::toggleQuranicFontFallback,
+            onDismiss = { viewModel.setFontValidationModalVisible(false) }
         )
     }
 }

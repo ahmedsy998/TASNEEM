@@ -10,13 +10,20 @@ import androidx.core.content.res.ResourcesCompat
 import com.example.R
 import com.example.ui.theme.AmiriFontFamily
 import com.example.ui.theme.AmiriQuranFontFamily
+import com.example.ui.theme.ArefRuqaaFontFamily
 import com.example.ui.theme.CairoFontFamily
 import com.example.ui.theme.IbmPlexSansArabicFontFamily
 import com.example.ui.theme.KfgqpcUthmanicFontFamily
 import com.example.ui.theme.LateefFontFamily
+import com.example.ui.theme.MadaFontFamily
+import com.example.ui.theme.MarkaziTextFontFamily
 import com.example.ui.theme.NotoNaskhArabicFontFamily
+import com.example.ui.theme.NotoNaskhArabicUiFontFamily
 import com.example.ui.theme.NotoSansArabicFontFamily
+import com.example.ui.theme.NotoSansArabicUiFontFamily
+import com.example.ui.theme.ReemKufiFontFamily
 import com.example.ui.theme.ScheherazadeNewFontFamily
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 data class SurahInfo(
@@ -114,80 +121,288 @@ data class ReciterInfo(
     val bitrateKbps: Int
 )
 
+/**
+ * Built-in & Imported Arabic Font Categories (Section 2).
+ */
+enum class ArabicFontCategory(
+    val id: String,
+    val titleAr: String,
+    val shortTitleAr: String
+) {
+    QURANIC_FONTS("quranic", "الخطوط القرآنية والمصحفية (Quranic Fonts)", "خطوط قرآنية"),
+    NASKH_FONTS("naskh", "خطوط النسخ العربية (Naskh Fonts)", "خطوط النسخ"),
+    MODERN_ARABIC_FONTS("modern", "الخطوط العربية الحديثة (Modern Arabic Fonts)", "خطوط حديثة"),
+    DECORATIVE_ARABIC_FONTS("decorative", "الخطوط العربية الزخرفية والديوانية (Decorative Fonts)", "خطوط زخرفية"),
+    IMPORTED_FONTS("imported", "الخطوط المستوردة من الهاتف (خط مستورد)", "خط مستورد")
+}
+
+/**
+ * 15 Genuine Permanently Bundled Arabic & Quranic Fonts (Section 2).
+ * Every enum entry maps to its own distinct physical .ttf font file in res/font/.
+ */
 enum class ArabicQuranFont(
     val id: String,
     val displayNameAr: String,
+    val englishName: String,
     val descriptionAr: String,
+    val category: ArabicFontCategory,
     @FontRes val fontResId: Int,
+    val resourceFileName: String,
     val composeFontFamily: FontFamily,
     val licensingNoteAr: String? = null
 ) {
+    // 1. KFGQPC Uthmanic Script (Quranic)
     KFGQPC_UTHMANIC(
         id = "kfgqpc_uthmanic",
         displayNameAr = "خط مصحف المدينة العثماني (KFGQPC Uthmanic)",
+        englishName = "KFGQPC Uthmanic Script",
         descriptionAr = "خط مجمع الملك فهد لطباعة المصحف الشريف بالرسم العثماني الأصيل",
+        category = ArabicFontCategory.QURANIC_FONTS,
         fontResId = R.font.kfgqpc_uthmanic,
+        resourceFileName = "kfgqpc_uthmanic.ttf",
         composeFontFamily = KfgqpcUthmanicFontFamily,
         licensingNoteAr = "خط حفص العثماني القياسي للمصحف الشريف"
     ),
-    AMIRI(
-        id = "amiri",
-        displayNameAr = "خط أميري الكلاسيكي (Amiri)",
-        descriptionAr = "خط نسخ أدبي عريق مستوحى من مطبعة بولاق بالقاهرة",
-        fontResId = R.font.amiri,
-        composeFontFamily = AmiriFontFamily
+
+    // 2. Amiri Quran (Quranic)
+    AMIRI_QURAN(
+        id = "amiri_quran",
+        displayNameAr = "خط أميري قرآن المصحفي (Amiri Quran)",
+        englishName = "Amiri Quran",
+        descriptionAr = "نسخة مصحفية مخصصة للقرآن الكريم بضبط متقن للحركات وعلامات الوقف (OFL)",
+        category = ArabicFontCategory.QURANIC_FONTS,
+        fontResId = R.font.amiri_quran,
+        resourceFileName = "amiri_quran.ttf",
+        composeFontFamily = AmiriQuranFontFamily,
+        licensingNoteAr = "ترخيص SIL Open Font License 1.1"
     ),
+
+    // 3. Scheherazade New (Quranic)
     SCHEHERAZADE_NEW(
         id = "scheherazade_new",
-        displayNameAr = "خط شهرزاد المصحفي (Scheherazade New)",
-        descriptionAr = "خط نسخ تقليدي واسع الحروف واضح الحركات والمدود",
+        displayNameAr = "خط شهرزاد المصحفي الجديد (Scheherazade New)",
+        englishName = "Scheherazade New",
+        descriptionAr = "خط نسخ مصحفي واسع الحروف يدعم كامل التشكيل والرموز القرآنية (OFL)",
+        category = ArabicFontCategory.QURANIC_FONTS,
         fontResId = R.font.scheherazade_new,
-        composeFontFamily = ScheherazadeNewFontFamily
+        resourceFileName = "scheherazade_new.ttf",
+        composeFontFamily = ScheherazadeNewFontFamily,
+        licensingNoteAr = "ترخيص SIL Open Font License 1.1"
     ),
+
+    // 4. Lateef (Quranic)
+    LATEEF(
+        id = "lateef",
+        displayNameAr = "خط لطيف القرآني الروحاني (Lateef)",
+        englishName = "Lateef",
+        descriptionAr = "خط قرآني انسيابي طويل القوائم كامل التشكيل وعلامات الضبط (OFL)",
+        category = ArabicFontCategory.QURANIC_FONTS,
+        fontResId = R.font.lateef,
+        resourceFileName = "lateef.ttf",
+        composeFontFamily = LateefFontFamily,
+        licensingNoteAr = "ترخيص SIL Open Font License 1.1"
+    ),
+
+    // 5. Amiri (Naskh)
+    AMIRI(
+        id = "amiri",
+        displayNameAr = "خط أميري النسخي الكلاسيكي (Amiri)",
+        englishName = "Amiri",
+        descriptionAr = "خط نسخ أدبي عريق مستوحى من مطبعة بولاق بالقاهرة (OFL)",
+        category = ArabicFontCategory.NASKH_FONTS,
+        fontResId = R.font.amiri,
+        resourceFileName = "amiri.ttf",
+        composeFontFamily = AmiriFontFamily,
+        licensingNoteAr = "ترخيص SIL Open Font License 1.1"
+    ),
+
+    // 6. Noto Naskh Arabic (Naskh)
     NOTO_NASKH_ARABIC(
         id = "noto_naskh_arabic",
         displayNameAr = "نوتو نسخ عربي (Noto Naskh Arabic)",
-        descriptionAr = "خط نسخ متوازن فائق الوضوح للشاشات الذكية",
+        englishName = "Noto Naskh Arabic",
+        descriptionAr = "خط نسخ متوازن فائق الوضوح يدعم التشكيل الكامل والرموز القرآنية (OFL)",
+        category = ArabicFontCategory.NASKH_FONTS,
         fontResId = R.font.noto_naskh_arabic,
-        composeFontFamily = NotoNaskhArabicFontFamily
+        resourceFileName = "noto_naskh_arabic.ttf",
+        composeFontFamily = NotoNaskhArabicFontFamily,
+        licensingNoteAr = "ترخيص SIL Open Font License 1.1"
     ),
-    LATEEF(
-        id = "lateef",
-        displayNameAr = "خط لطيف الروحاني (Lateef)",
-        descriptionAr = "خط عربي انسيابي طويل القوائم يناسب المقاطع الهادئة",
-        fontResId = R.font.lateef,
-        composeFontFamily = LateefFontFamily
+
+    // 7. Noto Naskh Arabic UI (Naskh)
+    NOTO_NASKH_ARABIC_UI(
+        id = "noto_naskh_arabic_ui",
+        displayNameAr = "نوتو نسخ واجهات (Noto Naskh Arabic UI)",
+        englishName = "Noto Naskh Arabic UI",
+        descriptionAr = "نسخة نسخ مهيأة للشاشات بمسافات رأسية متزنة وتشكيل واضح (OFL)",
+        category = ArabicFontCategory.NASKH_FONTS,
+        fontResId = R.font.noto_naskh_arabic_ui,
+        resourceFileName = "noto_naskh_arabic_ui.ttf",
+        composeFontFamily = NotoNaskhArabicUiFontFamily,
+        licensingNoteAr = "ترخيص SIL Open Font License 1.1"
     ),
+
+    // 8. Markazi Text (Naskh)
+    MARKAZI_TEXT(
+        id = "markazi_text",
+        displayNameAr = "خط مركزي النصي (Markazi Text)",
+        englishName = "Markazi Text",
+        descriptionAr = "خط نسخ معاصر أنيق للقراءة المطولة والمقاطع الهادئة (OFL)",
+        category = ArabicFontCategory.NASKH_FONTS,
+        fontResId = R.font.markazi_text,
+        resourceFileName = "markazi_text.ttf",
+        composeFontFamily = MarkaziTextFontFamily,
+        licensingNoteAr = "ترخيص SIL Open Font License 1.1"
+    ),
+
+    // 9. Noto Sans Arabic (Modern)
     NOTO_SANS_ARABIC(
         id = "noto_sans_arabic",
         displayNameAr = "نوتو سانس عربي (Noto Sans Arabic)",
-        descriptionAr = "خط عصري مجرد واضح القراءة في المقاطع السريعة",
+        englishName = "Noto Sans Arabic",
+        descriptionAr = "خط عصري مجرد واضح القراءة والحركات في المقاطع السريعة (OFL)",
+        category = ArabicFontCategory.MODERN_ARABIC_FONTS,
         fontResId = R.font.noto_sans_arabic,
-        composeFontFamily = NotoSansArabicFontFamily
+        resourceFileName = "noto_sans_arabic.ttf",
+        composeFontFamily = NotoSansArabicFontFamily,
+        licensingNoteAr = "ترخيص SIL Open Font License 1.1"
     ),
+
+    // 10. Noto Sans Arabic UI (Modern)
+    NOTO_SANS_ARABIC_UI(
+        id = "noto_sans_arabic_ui",
+        displayNameAr = "نوتو سانس واجهات (Noto Sans Arabic UI)",
+        englishName = "Noto Sans Arabic UI",
+        descriptionAr = "نسخة سانس مهيأة لعرض الفيديو والواجهات عالية التباين (OFL)",
+        category = ArabicFontCategory.MODERN_ARABIC_FONTS,
+        fontResId = R.font.noto_sans_arabic_ui,
+        resourceFileName = "noto_sans_arabic_ui.ttf",
+        composeFontFamily = NotoSansArabicUiFontFamily,
+        licensingNoteAr = "ترخيص SIL Open Font License 1.1"
+    ),
+
+    // 11. Cairo (Modern)
     CAIRO(
         id = "cairo",
         displayNameAr = "خط القاهرة الهندسي (Cairo)",
-        descriptionAr = "خط عربي حديث ذو طابع هندسي متماسك",
+        englishName = "Cairo",
+        descriptionAr = "خط عربي حديث ذو طابع هندسي متماسك للعناوين والنصوص (OFL)",
+        category = ArabicFontCategory.MODERN_ARABIC_FONTS,
         fontResId = R.font.cairo,
-        composeFontFamily = CairoFontFamily
+        resourceFileName = "cairo.ttf",
+        composeFontFamily = CairoFontFamily,
+        licensingNoteAr = "ترخيص SIL Open Font License 1.1"
     ),
+
+    // 12. IBM Plex Sans Arabic (Modern)
     IBM_PLEX_SANS_ARABIC(
         id = "ibm_plex_sans_arabic",
         displayNameAr = "آي بي إم بليكس عربي (IBM Plex Sans Arabic)",
-        descriptionAr = "خط تقني احترافي متناسق الحروف والمسافات",
+        englishName = "IBM Plex Sans Arabic",
+        descriptionAr = "خط تقني احترافي متناسق الحروف والمسافات والحركات (OFL)",
+        category = ArabicFontCategory.MODERN_ARABIC_FONTS,
         fontResId = R.font.ibm_plex_sans_arabic,
-        composeFontFamily = IbmPlexSansArabicFontFamily
+        resourceFileName = "ibm_plex_sans_arabic.ttf",
+        composeFontFamily = IbmPlexSansArabicFontFamily,
+        licensingNoteAr = "ترخيص SIL Open Font License 1.1"
+    ),
+
+    // 13. Mada (Modern)
+    MADA(
+        id = "mada",
+        displayNameAr = "خط مدى العصري (Mada)",
+        englishName = "Mada",
+        descriptionAr = "خط عربي حديث واضح الحروف والتشكيل مستوحى من لوحات القاهرة (OFL)",
+        category = ArabicFontCategory.MODERN_ARABIC_FONTS,
+        fontResId = R.font.mada,
+        resourceFileName = "mada.ttf",
+        composeFontFamily = MadaFontFamily,
+        licensingNoteAr = "ترخيص SIL Open Font License 1.1"
+    ),
+
+    // 14. Reem Kufi (Decorative)
+    REEM_KUFI(
+        id = "reem_kufi",
+        displayNameAr = "خط ريم كوفي الزخرفي (Reem Kufi)",
+        englishName = "Reem Kufi",
+        descriptionAr = "خط كوفي فاطمي هندسي فاخر مستوحى من نقوش المساجد التاريخية (OFL)",
+        category = ArabicFontCategory.DECORATIVE_ARABIC_FONTS,
+        fontResId = R.font.reem_kufi,
+        resourceFileName = "reem_kufi.ttf",
+        composeFontFamily = ReemKufiFontFamily,
+        licensingNoteAr = "ترخيص SIL Open Font License 1.1"
+    ),
+
+    // 15. Aref Ruqaa (Decorative)
+    AREF_RUQAA(
+        id = "aref_ruqaa",
+        displayNameAr = "خط عارف رقعة الأصيل (Aref Ruqaa)",
+        englishName = "Aref Ruqaa",
+        descriptionAr = "خط رقعة كلاسيكي رشيق يحاكي الخطاط محمد عارف (OFL)",
+        category = ArabicFontCategory.DECORATIVE_ARABIC_FONTS,
+        fontResId = R.font.aref_ruqaa,
+        resourceFileName = "aref_ruqaa.ttf",
+        composeFontFamily = ArefRuqaaFontFamily,
+        licensingNoteAr = "ترخيص SIL Open Font License 1.1"
     );
+
+    /**
+     * Resolves and caches a physical File containing the bundled .ttf bytes for this built-in font
+     * so OpenType binary table inspection and Typeface.createFromFile work identically on device and JVM tests.
+     */
+    fun resolveBundledFontFile(context: Context): File? {
+        cachedFontFiles[id]?.takeIf { it.exists() && it.length() > 1024L }?.let { return it }
+
+        // Check local project directory first (useful during unit/Robolectric tests)
+        val projectCandidatePaths = listOf(
+            File("src/main/res/font/$resourceFileName"),
+            File("app/src/main/res/font/$resourceFileName")
+        )
+        for (candidate in projectCandidatePaths) {
+            if (candidate.exists() && candidate.length() > 1024L) {
+                cachedFontFiles[id] = candidate
+                return candidate
+            }
+        }
+
+        return try {
+            val outDir = File(context.cacheDir, "builtin_fonts").apply { mkdirs() }
+            val outFile = File(outDir, resourceFileName)
+            if (!outFile.exists() || outFile.length() < 1024L) {
+                context.resources.openRawResource(fontResId).use { input ->
+                    outFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            }
+            if (outFile.exists() && outFile.length() > 1024L) {
+                cachedFontFiles[id] = outFile
+                outFile
+            } else null
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     fun loadTypeface(context: Context, bold: Boolean = false): Typeface {
         val cacheKey = "${id}_$bold"
         typefaceCache[cacheKey]?.let { return it }
+
         val base = try {
-            ResourcesCompat.getFont(context.applicationContext, fontResId) ?: Typeface.DEFAULT
-        } catch (e: Exception) {
-            Typeface.DEFAULT
+            val file = resolveBundledFontFile(context)
+            if (file != null && file.exists()) {
+                Typeface.createFromFile(file)
+            } else {
+                ResourcesCompat.getFont(context.applicationContext, fontResId) ?: Typeface.DEFAULT
+            }
+        } catch (_: Exception) {
+            try {
+                ResourcesCompat.getFont(context.applicationContext, fontResId) ?: Typeface.DEFAULT
+            } catch (_: Exception) {
+                Typeface.DEFAULT
+            }
         }
+
         val resolved = if (bold) Typeface.create(base, Typeface.BOLD) else base
         typefaceCache[cacheKey] = resolved
         return resolved
@@ -195,8 +410,151 @@ enum class ArabicQuranFont(
 
     companion object {
         private val typefaceCache = ConcurrentHashMap<String, Typeface>()
+        private val cachedFontFiles = ConcurrentHashMap<String, File>()
+
+        fun fromIdOrDefault(id: String): ArabicQuranFont {
+            return entries.find { it.id == id } ?: KFGQPC_UTHMANIC
+        }
     }
 }
+
+/**
+ * Supported custom font file formats (Section 3).
+ */
+enum class FontFileFormat(val extension: String, val labelAr: String) {
+    TTF("ttf", "TrueType (.TTF)"),
+    OTF("otf", "OpenType (.OTF)"),
+    UNKNOWN("", "غير معروف")
+}
+
+/**
+ * Classification of a font's compatibility with vocalized Quranic Arabic text (Sections 4 & 5).
+ */
+enum class FontQuranCompatibilityLevel(
+    val id: String,
+    val badgeTitleAr: String,
+    val descriptionAr: String
+) {
+    FULLY_VERIFIED_QURANIC(
+        id = "fully_verified_quranic",
+        badgeTitleAr = "متوافق كليًا مع الرسم والتشكيل القرآني",
+        descriptionAr = "يدعم جميع الحروف العربية والحركات والشدة والتنوين والمدود وعلامات الوقف المصحفية مع تموضع OpenType (GSUB/GPOS) سليم."
+    ),
+    REQUIRES_VISUAL_VERIFICATION_OR_FALLBACK(
+        id = "requires_visual_verification_or_fallback",
+        badgeTitleAr = "يدعم التشكيل الأساسي — يُنصح بالتحقق البصري والخط الاحتياطي للرموز",
+        descriptionAr = "يدعم الحروف العربية وحركات التشكيل الأساسية، لكن تنقصه بعض رموز الوقف العثمانية أو يتطلب مراجعة المعاينة مع تفعيل الخط الاحتياطي للرموز."
+    ),
+    PARTIAL_ARABIC_INCOMPLETE_TASHKEEL(
+        id = "partial_arabic_incomplete_tashkeel",
+        badgeTitleAr = "خط عربي غير مكتمل التشكيل القرآني — يلزم الخط الاحتياطي",
+        descriptionAr = "يدعم الحروف العربية العادية لكنه يفتقر إلى بعض حركات التشكيل أو قواعد ربط الحركات (GPOS Mark-to-Base/Mark-to-Mark)."
+    ),
+    INCOMPATIBLE_NO_ARABIC(
+        id = "incompatible_no_arabic",
+        badgeTitleAr = "غير صالح للنص العربي أو القرآني",
+        descriptionAr = "الملف لا يدعم الحروف العربية الأساسية أو تالف ولا يمكن اعتماده."
+    )
+}
+
+/**
+ * Low-level binary OpenType / TrueType inspection results (Section 4).
+ */
+data class OpenTypeCapabilitiesReport(
+    val format: FontFileFormat,
+    val sfntVersionTag: String,
+    val internalFamilyName: String,
+    val fullFontName: String,
+    val postScriptName: String,
+    val unitsPerEm: Int,
+    val ascender: Int,
+    val descender: Int,
+    val yMin: Int,
+    val yMax: Int,
+    val tableTags: Set<String>,
+    val hasCmapTable: Boolean,
+    val hasGsubTable: Boolean,
+    val hasGposTable: Boolean,
+    val hasGdefTable: Boolean,
+    val hasArabicScriptInGsub: Boolean,
+    val hasArabicScriptInGpos: Boolean,
+    val hasArabicJoiningFeatures: Boolean, // init, medi, fina, isol
+    val hasArabicLigatureFeatures: Boolean, // rlig, liga, calt, ccmp
+    val hasMarkToBaseGpos: Boolean, // GPOS feature 'mark' or Lookup Type 4/5
+    val hasMarkToMarkGpos: Boolean, // GPOS feature 'mkmk' or Lookup Type 6
+    val basicArabicLetterCount: Int,
+    val totalBasicArabicLetters: Int,
+    val coreTashkeelCount: Int,
+    val totalCoreTashkeelMarks: Int,
+    val quranicSymbolCount: Int,
+    val totalQuranicSymbols: Int,
+    val supportedCodepointsCount: Int,
+    val missingCoreTashkeelMarksAr: List<String>,
+    val missingQuranicSymbolsAr: List<String>
+) {
+    val basicArabicCoverageRatio: Float
+        get() = if (totalBasicArabicLetters > 0) basicArabicLetterCount.toFloat() / totalBasicArabicLetters else 0f
+
+    val coreTashkeelCoverageRatio: Float
+        get() = if (totalCoreTashkeelMarks > 0) coreTashkeelCount.toFloat() / totalCoreTashkeelMarks else 0f
+
+    val quranicSymbolCoverageRatio: Float
+        get() = if (totalQuranicSymbols > 0) quranicSymbolCount.toFloat() / totalQuranicSymbols else 0f
+}
+
+/**
+ * Result of testing a single vocalized Quranic validation sample (Section 5).
+ */
+data class QuranFontValidationSampleResult(
+    val id: String,
+    val titleAr: String,
+    val categoryAr: String,
+    val sampleText: String,
+    val passed: Boolean,
+    val hasAllGlyphs: Boolean,
+    val marksProperlyAttached: Boolean,
+    val noVerticalClipping: Boolean,
+    val diagnosticNoteAr: String
+)
+
+/**
+ * Complete Intelligent Quranic Font Validation Report (Sections 4 & 5).
+ */
+data class QuranFontValidationReport(
+    val fontId: String,
+    val fontDisplayName: String,
+    val compatibilityLevel: FontQuranCompatibilityLevel,
+    val isUsableInGallery: Boolean,
+    val isFullyQuranCompatible: Boolean,
+    val requiresFallbackForQuran: Boolean,
+    val canGuaranteeMixedMarkAttachment: Boolean,
+    val hasMissingCharacters: Boolean,
+    val hasDetachedMarks: Boolean,
+    val hasIncorrectMarkPositioning: Boolean,
+    val hasOverlappingDiacritics: Boolean,
+    val hasBrokenJoiningOrLigatures: Boolean,
+    val hasVerticalClippingRisk: Boolean,
+    val openTypeReport: OpenTypeCapabilitiesReport,
+    val sampleResults: List<QuranFontValidationSampleResult>,
+    val summaryMessageAr: String,
+    val warningMessageAr: String?
+)
+
+/**
+ * Represents a user-imported custom font (.ttf or .otf) stored permanently in private app storage (Sections 3 & 7).
+ */
+data class CustomImportedFont(
+    val id: String,
+    val displayName: String,
+    val originalFileName: String,
+    val localFilePath: String,
+    val format: FontFileFormat,
+    val fileSizeBytes: Long,
+    val sha256Hash: String,
+    val importedAtEpochMs: Long,
+    val validationReport: QuranFontValidationReport,
+    val badgeLabelAr: String = "خط مستورد"
+)
 
 enum class QuranTextAlignment(
     val id: String,
@@ -225,6 +583,11 @@ enum class TextColorOption(
 
 data class QuranTextStyleConfig(
     val font: ArabicQuranFont = ArabicQuranFont.KFGQPC_UTHMANIC,
+    val selectedFontId: String = font.id,
+    val customFontFilePath: String? = null,
+    val customFontDisplayName: String? = null,
+    val enableQuranicFontFallback: Boolean = true,
+    val fallbackFont: ArabicQuranFont = ArabicQuranFont.KFGQPC_UTHMANIC,
     val fontSizeSp: Float = 28f,
     val lineSpacingMultiplier: Float = 1.45f,
     val colorOption: TextColorOption = TextColorOption.WHITE,
@@ -243,7 +606,17 @@ data class QuranTextStyleConfig(
     val showTranslation: Boolean = false,
     val translationFontSizeScale: Float = 0.65f,
     val smoothTransitions: Boolean = true
-)
+) {
+    val isCustomImportedFontSelected: Boolean
+        get() = !customFontFilePath.isNullOrBlank() && selectedFontId.startsWith("imported_")
+
+    val activeFontDisplayNameAr: String
+        get() = if (isCustomImportedFontSelected) {
+            "${customFontDisplayName ?: "خط مخصص"} (خط مستورد)"
+        } else {
+            font.displayNameAr
+        }
+}
 
 /**
  * Independent Header Element Configuration (Requirement 08 - إعدادات معلومات التلاوة)

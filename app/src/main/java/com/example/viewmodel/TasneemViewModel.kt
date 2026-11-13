@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.AudioDownloadManager
 import com.example.data.CuratedBackgroundMediaRepository
 import com.example.data.QuranDataRepository
+import com.example.data.QuranFontManager
 import com.example.data.ReciterRepository
 import com.example.data.ThemeManager
 import com.example.media.Mp4VideoRenderEngine
@@ -22,11 +23,13 @@ import com.example.media.VideoFrameCanvasRenderer
 import com.example.model.ArabicQuranFont
 import com.example.model.AudioDownloadState
 import com.example.model.CuratedBackgroundMediaItem
+import com.example.model.CustomImportedFont
 import com.example.model.HeaderElementConfig
 import com.example.model.MediaCropMode
 import com.example.model.MushafBasmalaRuleMode
 import com.example.model.MushafEditionConfig
 import com.example.model.PhoneMediaBackground
+import com.example.model.QuranFontValidationReport
 import com.example.model.QuranTextAlignment
 import com.example.model.QuranTextStyleConfig
 import com.example.model.QuranVerse
@@ -80,6 +83,11 @@ data class StudioUiState(
     val phoneMedia: PhoneMediaBackground = PhoneMediaBackground(),
     val mediaImportMessageAr: String? = null,
     val textStyle: QuranTextStyleConfig = QuranTextStyleConfig(),
+    val importedFonts: List<CustomImportedFont> = emptyList(),
+    val fontImportMessageAr: String? = null,
+    val fontImportWarningAr: String? = null,
+    val activeFontValidationReport: QuranFontValidationReport? = null,
+    val showFontValidationModal: Boolean = false,
     val recitationHeader: RecitationHeaderConfig = RecitationHeaderConfig(),
     val verseTransition: VerseTransitionConfig = VerseTransitionConfig(),
     val watermark: WatermarkConfig = WatermarkConfig(),
@@ -93,6 +101,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     private val appContext = application.applicationContext
     private val themeManager = ThemeManager(appContext)
     val quranRepository = QuranDataRepository(appContext)
+    val quranFontManager = QuranFontManager(appContext)
     val reciterRepository = ReciterRepository()
     val curatedMediaRepository = CuratedBackgroundMediaRepository(appContext)
     private val audioDownloadManager = AudioDownloadManager(appContext, reciterRepository)
@@ -117,8 +126,14 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     val previewReciterId: StateFlow<String?> = syncEngine.previewReciterId
 
     private val defaultReciter = reciterRepository.allReciters[10] // ياسر الدوسري (index 11)
+    private val initialTextStyle = quranFontManager.restorePersistedTextStyle(QuranTextStyleConfig())
+    private val initialImportedFonts = quranFontManager.getImportedFonts()
     private val _uiState = MutableStateFlow(
-        StudioUiState(selectedReciter = defaultReciter)
+        StudioUiState(
+            selectedReciter = defaultReciter,
+            textStyle = initialTextStyle,
+            importedFonts = initialImportedFonts
+        )
     )
     val uiState: StateFlow<StudioUiState> = _uiState.asStateFlow()
 
@@ -485,10 +500,193 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // ==================================================
-    // Arabic Font, Quranic Text & Independent Tashkeel Colors (Requirements 03, 04, 09, 12)
+    // Arabic Font, Custom Font Import, Quranic Validation & Fallback (Sections 02..10)
     // ==================================================
     fun updateArabicFont(font: ArabicQuranFont) {
-        _uiState.update { it.copy(textStyle = it.textStyle.copy(font = font)) }
+        val report = quranFontManager.getBuiltInFontValidationReport(font)
+        val autoEnableFallback = if (report.requiresFallbackForQuran) true else _uiState.value.textStyle.enableQuranicFontFallback
+        quranFontManager.saveSelectedFontPreference(
+            selectedFontId = font.id,
+            enableFallback = autoEnableFallback,
+            fallbackFont = _uiState.value.textStyle.fallbackFont
+        )
+        _uiState.update {
+            it.copy(
+                textStyle = it.textStyle.copy(
+                    font = font,
+                    selectedFontId = font.id,
+                    customFontFilePath = null,
+                    customFontDisplayName = null,
+                    enableQuranicFontFallback = autoEnableFallback
+                ),
+                activeFontValidationReport = report,
+                fontImportWarningAr = report.warningMessageAr
+            )
+        }
+    }
+
+    fun selectImportedFont(importedFont: CustomImportedFont) {
+        val autoEnableFallback = if (importedFont.validationReport.requiresFallbackForQuran) {
+            true
+        } else {
+            _uiState.value.textStyle.enableQuranicFontFallback
+        }
+        quranFontManager.saveSelectedFontPreference(
+            selectedFontId = importedFont.id,
+            enableFallback = autoEnableFallback,
+            fallbackFont = _uiState.value.textStyle.fallbackFont
+        )
+        _uiState.update {
+            it.copy(
+                textStyle = it.textStyle.copy(
+                    selectedFontId = importedFont.id,
+                    customFontFilePath = importedFont.localFilePath,
+                    customFontDisplayName = importedFont.displayName,
+                    enableQuranicFontFallback = autoEnableFallback
+                ),
+                activeFontValidationReport = importedFont.validationReport,
+                fontImportWarningAr = importedFont.validationReport.warningMessageAr
+            )
+        }
+    }
+
+    fun onCustomFontPickedFromPhone(uri: Uri?) {
+        if (uri == null) return
+        val result = quranFontManager.importFontFromUri(uri)
+        result.fold(
+            onSuccess = { importRes ->
+                val updatedList = quranFontManager.getImportedFonts()
+                val autoEnableFallback = if (importRes.importedFont.validationReport.requiresFallbackForQuran) {
+                    true
+                } else {
+                    _uiState.value.textStyle.enableQuranicFontFallback
+                }
+                quranFontManager.saveSelectedFontPreference(
+                    selectedFontId = importRes.importedFont.id,
+                    enableFallback = autoEnableFallback,
+                    fallbackFont = _uiState.value.textStyle.fallbackFont
+                )
+                _uiState.update {
+                    it.copy(
+                        importedFonts = updatedList,
+                        textStyle = it.textStyle.copy(
+                            selectedFontId = importRes.importedFont.id,
+                            customFontFilePath = importRes.importedFont.localFilePath,
+                            customFontDisplayName = importRes.importedFont.displayName,
+                            enableQuranicFontFallback = autoEnableFallback
+                        ),
+                        activeFontValidationReport = importRes.importedFont.validationReport,
+                        fontImportMessageAr = importRes.messageAr,
+                        fontImportWarningAr = importRes.warningAr
+                    )
+                }
+            },
+            onFailure = { err ->
+                _uiState.update {
+                    it.copy(
+                        fontImportMessageAr = null,
+                        fontImportWarningAr = err.localizedMessage ?: "تعذر استيراد ملف الخط من الهاتف."
+                    )
+                }
+            }
+        )
+    }
+
+    fun importCustomFontFromFile(file: File, originalFileNameOverride: String? = null): Result<CustomImportedFont> {
+        val result = quranFontManager.importFontFromFile(file, originalFileNameOverride)
+        return result.map { importRes ->
+            val updatedList = quranFontManager.getImportedFonts()
+            val autoEnableFallback = if (importRes.importedFont.validationReport.requiresFallbackForQuran) {
+                true
+            } else {
+                _uiState.value.textStyle.enableQuranicFontFallback
+            }
+            quranFontManager.saveSelectedFontPreference(
+                selectedFontId = importRes.importedFont.id,
+                enableFallback = autoEnableFallback,
+                fallbackFont = _uiState.value.textStyle.fallbackFont
+            )
+            _uiState.update {
+                it.copy(
+                    importedFonts = updatedList,
+                    textStyle = it.textStyle.copy(
+                        selectedFontId = importRes.importedFont.id,
+                        customFontFilePath = importRes.importedFont.localFilePath,
+                        customFontDisplayName = importRes.importedFont.displayName,
+                        enableQuranicFontFallback = autoEnableFallback
+                    ),
+                    activeFontValidationReport = importRes.importedFont.validationReport,
+                    fontImportMessageAr = importRes.messageAr,
+                    fontImportWarningAr = importRes.warningAr
+                )
+            }
+            importRes.importedFont
+        }.onFailure { err ->
+            _uiState.update {
+                it.copy(
+                    fontImportMessageAr = null,
+                    fontImportWarningAr = err.localizedMessage ?: "تعذر استيراد ملف الخط."
+                )
+            }
+        }
+    }
+
+    fun removeImportedFont(fontId: String) {
+        val wasSelected = _uiState.value.textStyle.selectedFontId == fontId
+        val deleted = quranFontManager.removeImportedFont(fontId)
+        if (!deleted) return
+        val updatedList = quranFontManager.getImportedFonts()
+        if (wasSelected) {
+            val defaultFont = ArabicQuranFont.KFGQPC_UTHMANIC
+            val defaultReport = quranFontManager.getBuiltInFontValidationReport(defaultFont)
+            _uiState.update {
+                it.copy(
+                    importedFonts = updatedList,
+                    textStyle = it.textStyle.copy(
+                        font = defaultFont,
+                        selectedFontId = defaultFont.id,
+                        customFontFilePath = null,
+                        customFontDisplayName = null
+                    ),
+                    activeFontValidationReport = defaultReport,
+                    fontImportMessageAr = "تم حذف الخط المستورد والتبديل تلقائيًا إلى خط مصحف المدينة الافتراضي.",
+                    fontImportWarningAr = null
+                )
+            }
+        } else {
+            _uiState.update {
+                it.copy(
+                    importedFonts = updatedList,
+                    fontImportMessageAr = "تم حذف الخط المستورد بنجاح."
+                )
+            }
+        }
+    }
+
+    fun toggleQuranicFontFallback(enabled: Boolean) {
+        val currentStyle = _uiState.value.textStyle
+        quranFontManager.saveSelectedFontPreference(
+            selectedFontId = currentStyle.selectedFontId,
+            enableFallback = enabled,
+            fallbackFont = currentStyle.fallbackFont
+        )
+        _uiState.update {
+            it.copy(textStyle = it.textStyle.copy(enableQuranicFontFallback = enabled))
+        }
+    }
+
+    fun setFontValidationModalVisible(visible: Boolean) {
+        val report = if (visible) {
+            quranFontManager.getValidationReportForFont(_uiState.value.textStyle)
+        } else {
+            _uiState.value.activeFontValidationReport
+        }
+        _uiState.update {
+            it.copy(
+                showFontValidationModal = visible,
+                activeFontValidationReport = report
+            )
+        }
     }
 
     fun resetArabicFont() {

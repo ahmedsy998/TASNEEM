@@ -22,20 +22,25 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.FactCheck
 import androidx.compose.material.icons.filled.MovieCreation
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Verified
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -68,9 +73,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.QuranDataRepository
+import com.example.data.QuranFontManager
 import com.example.media.QuranTextAndLayoutEngine
+import com.example.model.ArabicFontCategory
 import com.example.model.ArabicQuranFont
 import com.example.model.AudioDownloadState
+import com.example.model.CustomImportedFont
+import com.example.model.FontQuranCompatibilityLevel
 import com.example.model.QuranTextAlignment
 import com.example.model.QuranTextStyleConfig
 import com.example.model.SocialPlatform
@@ -91,43 +100,98 @@ import com.example.ui.theme.TasneemSoftIvory
 import kotlin.math.roundToInt
 
 /**
- * Group 4: Arabic Fonts Library ("الخطوط العربية") - Requirement 12.
- * All 8 Arabic fonts load real full Arabic .ttf typefaces and visibly change the Quranic text.
+ * Group 4: Advanced Arabic & Quranic Font System ("الخطوط العربية") - Sections 2, 3, 4, 5, 6, 7, 8.
+ * - 15 Permanently bundled Arabic/Quranic fonts organized by category.
+ * - Custom font import from phone ("إضافة خط من الهاتف") for TTF and OTF via SAF.
+ * - Imported fonts labeled with "خط مستورد" + delete action + persistence across restarts.
+ * - Intelligent Quranic font fallback ("استخدام خط احتياطي للتشكيل القرآني").
+ * - 10-Sample OpenType & Tashkeel Validation Lab launcher.
  */
 @Composable
 fun ArabicFontsCollapsibleGroup(
     expanded: Boolean,
     onToggleExpanded: () -> Unit,
     textStyle: QuranTextStyleConfig,
+    importedFonts: List<CustomImportedFont> = emptyList(),
+    fontImportMessageAr: String? = null,
+    fontImportWarningAr: String? = null,
     onSelectFont: (ArabicQuranFont) -> Unit,
+    onSelectImportedFont: (CustomImportedFont) -> Unit = {},
+    onDeleteImportedFont: (String) -> Unit = {},
+    onImportFontFromPhone: () -> Unit = {},
+    onToggleQuranicFallback: (Boolean) -> Unit = {},
+    onOpenValidationLab: () -> Unit = {},
     onResetFont: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = LocalTasneemColors.current
     val mainComposeColor = Color(textStyle.mainTextColorHex or 0xFF000000L)
     val tashkeelComposeColor = Color(textStyle.tashkeelColorHex or 0xFF000000L)
+    var selectedCategoryFilter by remember { mutableStateOf<ArabicFontCategory?>(null) }
 
     CollapsibleStudioGroupCard(
         groupNumberAr = "٤",
         titleAr = "الخطوط العربية",
-        subtitleAr = textStyle.font.displayNameAr,
+        subtitleAr = textStyle.activeFontDisplayNameAr,
         expanded = expanded,
         onToggleExpanded = onToggleExpanded,
         onResetGroup = onResetFont,
         testTag = "collapsible_group_arabic_fonts",
         modifier = modifier
     ) {
+        // 1. Top Actions: Import Font from Phone ("إضافة خط من الهاتف") + Validation Lab + Reset
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "اختر الخط العربي المصحفي (٨ خطوط عربية كاملة الحروف والتشكيل)",
-                style = MaterialTheme.typography.labelLarge,
-                color = TasneemOrange,
-                modifier = Modifier.weight(1f)
-            )
+            Button(
+                onClick = onImportFontFromPhone,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = TasneemOrange,
+                    contentColor = TasneemDeepCharcoal
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .testTag("import_custom_font_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "إضافة خط من الهاتف",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            OutlinedButton(
+                onClick = onOpenValidationLab,
+                border = BorderStroke(1.dp, TasneemOrange),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .height(48.dp)
+                    .testTag("open_font_validation_lab_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.FactCheck,
+                    contentDescription = null,
+                    tint = TasneemOrange,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "فحص التشكيل",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TasneemOrange
+                )
+            }
+
             SettingResetIconButton(
                 contentDescription = "إعادة ضبط الخط إلى الافتراضي",
                 onReset = onResetFont,
@@ -135,74 +199,398 @@ fun ArabicFontsCollapsibleGroup(
             )
         }
 
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            ArabicQuranFont.entries.forEach { font ->
-                val isSelected = font == textStyle.font
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = colors.elevatedSurface,
-                    border = BorderStroke(
-                        width = if (isSelected) 2.dp else 1.dp,
-                        color = if (isSelected) TasneemOrange else colors.borderSubtle
+        Text(
+            text = "يدعم استيراد ملفات الخطوط العربية بصيغة TTF و OTF من الذاكرة الداخلية أو التنزيلات أو المستندات مع فحص التشكيل القرآني تلقائيًا.",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textSecondary
+        )
+
+        // 2. Intelligent Quranic Font Fallback Option ("استخدام خط احتياطي للتشكيل القرآني" - Section 6)
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = colors.elevatedSurface,
+            border = BorderStroke(1.dp, TasneemOrange.copy(alpha = 0.45f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "استخدام خط احتياطي للتشكيل القرآني",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = TasneemOrange
+                    )
+                    Text(
+                        text = "ضمان صحة اتصال الحروف وثبات الفتحة والضمة والكسرة والشدة والمدود وعلامات الوقف عند اختيار خط ينقصه بعض الرموز المصحفية",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textSecondary
+                    )
+                }
+                Switch(
+                    checked = textStyle.enableQuranicFontFallback,
+                    onCheckedChange = onToggleQuranicFallback,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = TasneemDeepCharcoal,
+                        checkedTrackColor = TasneemOrange
                     ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable { onSelectFont(font) }
-                        .testTag("font_option_${font.id}")
+                    modifier = Modifier.testTag("quranic_font_fallback_switch")
+                )
+            }
+        }
+
+        // 3. Feedback / Warning Banner after importing or selecting a font with incomplete Tashkeel
+        if (!fontImportMessageAr.isNullOrBlank()) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = TasneemOrange.copy(alpha = 0.14f),
+                border = BorderStroke(1.dp, TasneemOrange),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("font_import_status_banner")
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Column(
+                    Icon(
+                        imageVector = Icons.Default.Verified,
+                        contentDescription = null,
+                        tint = TasneemOrange,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = fontImportMessageAr,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textPrimary
+                    )
+                }
+            }
+        }
+
+        if (!fontImportWarningAr.isNullOrBlank()) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0x33FF9800),
+                border = BorderStroke(1.dp, Color(0xFFFFB74D)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("font_compatibility_warning_banner")
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = Color(0xFFFFB74D),
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Text(
+                        text = fontImportWarningAr,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFFFE0B2)
+                    )
+                }
+            }
+        }
+
+        // 4. Category Filter Bar (All + 4 Built-in Categories + Imported Fonts)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            val allSelected = selectedCategoryFilter == null
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = if (allSelected) TasneemOrange else colors.elevatedSurface,
+                border = BorderStroke(1.dp, if (allSelected) TasneemOrange else colors.borderSubtle),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .clickable { selectedCategoryFilter = null }
+                    .testTag("font_category_all")
+            ) {
+                Text(
+                    text = "جميع الخطوط (${ArabicQuranFont.entries.size + importedFonts.size})",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (allSelected) TasneemDeepCharcoal else colors.textPrimary,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                )
+            }
+
+            ArabicFontCategory.entries.forEach { category ->
+                val count = if (category == ArabicFontCategory.IMPORTED_FONTS) {
+                    importedFonts.size
+                } else {
+                    ArabicQuranFont.entries.count { it.category == category }
+                }
+                if (count > 0 || category != ArabicFontCategory.IMPORTED_FONTS) {
+                    val isCatSelected = selectedCategoryFilter == category
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = if (isCatSelected) TasneemOrange else colors.elevatedSurface,
+                        border = BorderStroke(1.dp, if (isCatSelected) TasneemOrange else colors.borderSubtle),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .clickable { selectedCategoryFilter = category }
+                            .testTag("font_category_${category.id}")
+                    ) {
+                        Text(
+                            text = "${category.shortTitleAr} (${QuranDataRepository.toArabicDigits(count)})",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (isCatSelected) TasneemDeepCharcoal else colors.textPrimary,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        // 5. User-Imported Custom Fonts Section ("خط مستورد")
+        val showImportedSection = (selectedCategoryFilter == null || selectedCategoryFilter == ArabicFontCategory.IMPORTED_FONTS) &&
+            importedFonts.isNotEmpty()
+        if (showImportedSection) {
+            Text(
+                text = ArabicFontCategory.IMPORTED_FONTS.titleAr,
+                style = MaterialTheme.typography.labelLarge,
+                color = TasneemOrange
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                importedFonts.forEach { imported ->
+                    val isSelected = textStyle.selectedFontId == imported.id
+                    val compatLevel = imported.validationReport.compatibilityLevel
+                    val compatColor = when (compatLevel) {
+                        FontQuranCompatibilityLevel.FULLY_VERIFIED_QURANIC -> Color(0xFF4CAF50)
+                        FontQuranCompatibilityLevel.REQUIRES_VISUAL_VERIFICATION_OR_FALLBACK -> TasneemOrange
+                        FontQuranCompatibilityLevel.PARTIAL_ARABIC_INCOMPLETE_TASHKEEL -> Color(0xFFFF8A65)
+                        FontQuranCompatibilityLevel.INCOMPATIBLE_NO_ARABIC -> Color(0xFFE53935)
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = colors.elevatedSurface,
+                        border = BorderStroke(
+                            width = if (isSelected) 2.dp else 1.dp,
+                            color = if (isSelected) TasneemOrange else colors.borderSubtle
+                        ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable { onSelectImportedFont(imported) }
+                            .testTag("imported_font_option_${imported.id}")
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Text(
-                                text = font.displayNameAr,
-                                style = MaterialTheme.typography.titleSmall,
-                                color = if (isSelected) TasneemOrange else colors.textPrimary
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = imported.displayName,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = if (isSelected) TasneemOrange else colors.textPrimary
+                                    )
+                                    // Required badge: "خط مستورد"
+                                    Surface(
+                                        shape = RoundedCornerShape(50),
+                                        color = TasneemOrange.copy(alpha = 0.2f),
+                                        border = BorderStroke(1.dp, TasneemOrange)
+                                    ) {
+                                        Text(
+                                            text = imported.badgeLabelAr, // "خط مستورد"
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = TasneemOrange,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    if (isSelected) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = "مختار",
+                                            tint = TasneemOrange,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                    IconButton(
+                                        onClick = { onDeleteImportedFont(imported.id) },
+                                        modifier = Modifier
+                                            .size(34.dp)
+                                            .testTag("delete_imported_font_${imported.id}")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.DeleteOutline,
+                                            contentDescription = "حذف الخط المستورد",
+                                            tint = Color(0xFFFF8A65),
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Quranic Sample Preview rendered with this exact imported font
+                            val previewConfigForImported = remember(imported, textStyle) {
+                                textStyle.copy(
+                                    selectedFontId = imported.id,
+                                    customFontFilePath = imported.localFilePath,
+                                    customFontDisplayName = imported.displayName
+                                )
+                            }
+                            NativeQuranFontPreviewBox(
+                                sampleText = "﴿ وَمِزَاجُهُۥ مِن تَسْنِيمٍ ۝٢٧ عَيْنًا يَشْرَبُ بِهَا ٱلْمُقَرَّبُونَ ﴾",
+                                textStyle = previewConfigForImported,
+                                fontSizeSp = 20f,
+                                minHeightDp = 52.dp
                             )
-                            if (isSelected) {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = "مختار",
-                                    tint = TasneemOrange,
-                                    modifier = Modifier.size(18.dp)
+
+                            Text(
+                                text = "${imported.format.labelAr} · ${compatLevel.badgeTitleAr}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = compatColor
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 6. 15 Permanently Bundled Built-In Fonts Organized by Category (Section 2)
+        val categoriesToDisplay = if (selectedCategoryFilter != null && selectedCategoryFilter != ArabicFontCategory.IMPORTED_FONTS) {
+            listOf(selectedCategoryFilter!!)
+        } else if (selectedCategoryFilter == null) {
+            listOf(
+                ArabicFontCategory.QURANIC_FONTS,
+                ArabicFontCategory.NASKH_FONTS,
+                ArabicFontCategory.MODERN_ARABIC_FONTS,
+                ArabicFontCategory.DECORATIVE_ARABIC_FONTS
+            )
+        } else {
+            emptyList()
+        }
+
+        val previewSample = remember(
+            textStyle.mainTextColorHex,
+            textStyle.enableIndependentTashkeelColor,
+            textStyle.tashkeelColorHex
+        ) {
+            QuranTextAndLayoutEngine.buildQuranAnnotatedString(
+                text = "﴿ وَمِزَاجُهُۥ مِن تَسْنِيمٍ ۝٢٧ عَيْنًا يَشْرَبُ بِهَا ٱلْمُقَرَّبُونَ ﴾",
+                mainColor = mainComposeColor,
+                enableIndependentTashkeel = textStyle.enableIndependentTashkeelColor,
+                tashkeelColor = tashkeelComposeColor
+            )
+        }
+
+        categoriesToDisplay.forEach { category ->
+            val fontsInCategory = ArabicQuranFont.entries.filter { it.category == category }
+            if (fontsInCategory.isNotEmpty()) {
+                Text(
+                    text = category.titleAr,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = TasneemOrange,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    fontsInCategory.forEach { font ->
+                        val isSelected = !textStyle.isCustomImportedFontSelected && font == textStyle.font
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = colors.elevatedSurface,
+                            border = BorderStroke(
+                                width = if (isSelected) 2.dp else 1.dp,
+                                color = if (isSelected) TasneemOrange else colors.borderSubtle
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable { onSelectFont(font) }
+                                .testTag("font_option_${font.id}")
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = font.displayNameAr,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = if (isSelected) TasneemOrange else colors.textPrimary,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Surface(
+                                            shape = RoundedCornerShape(50),
+                                            color = colors.cardBackground,
+                                            border = BorderStroke(1.dp, colors.borderSubtle)
+                                        ) {
+                                            Text(
+                                                text = font.category.shortTitleAr,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = colors.textSecondary,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                        if (isSelected) {
+                                            Icon(
+                                                imageVector = Icons.Default.CheckCircle,
+                                                contentDescription = "مختار",
+                                                tint = TasneemOrange,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Real Arabic Quranic Preview rendered with this exact font & current Tashkeel color
+                                Text(
+                                    text = previewSample,
+                                    fontFamily = font.composeFontFamily,
+                                    fontSize = 21.sp,
+                                    lineHeight = 36.sp,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Text(
+                                    text = font.descriptionAr,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = colors.textSecondary
                                 )
                             }
                         }
-
-                        // Real Arabic Quranic Preview rendered with this exact font & current Tashkeel color
-                        val previewSample = remember(
-                            textStyle.mainTextColorHex,
-                            textStyle.enableIndependentTashkeelColor,
-                            textStyle.tashkeelColorHex
-                        ) {
-                            QuranTextAndLayoutEngine.buildQuranAnnotatedString(
-                                text = "﴿ وَمِزَاجُهُۥ مِن تَسْنِيمٍ ۝٢٧ عَيْنًا يَشْرَبُ بِهَا ٱلْمُقَرَّبُونَ ﴾",
-                                mainColor = mainComposeColor,
-                                enableIndependentTashkeel = textStyle.enableIndependentTashkeelColor,
-                                tashkeelColor = tashkeelComposeColor
-                            )
-                        }
-
-                        Text(
-                            text = previewSample,
-                            fontFamily = font.composeFontFamily,
-                            fontSize = 21.sp,
-                            lineHeight = 34.sp,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Text(
-                            text = font.descriptionAr,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = colors.textSecondary
-                        )
                     }
                 }
             }
@@ -431,12 +819,21 @@ fun TextAndTashkeelColorsCollapsibleGroup(
                     .fillMaxWidth()
                     .padding(14.dp)
             ) {
-                Text(
-                    text = annotatedSample,
-                    fontFamily = textStyle.font.composeFontFamily,
-                    fontSize = 24.sp,
-                    textAlign = TextAlign.Center
-                )
+                if (textStyle.isCustomImportedFontSelected) {
+                    NativeQuranFontPreviewBox(
+                        sampleText = "بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ ﴿١﴾",
+                        textStyle = textStyle,
+                        fontSizeSp = 23f,
+                        minHeightDp = 56.dp
+                    )
+                } else {
+                    Text(
+                        text = annotatedSample,
+                        fontFamily = textStyle.font.composeFontFamily,
+                        fontSize = 24.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = "معاينة حية للون الحروف القرآنية ولون حركات التشكيل والضبط",
