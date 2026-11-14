@@ -412,6 +412,7 @@ private fun LivePreviewVideoFrame(
             if (phoneMedia.isVideo) {
                 PhoneBackgroundVideoSurface(
                     videoUriString = phoneMedia.uriString,
+                    phoneMedia = phoneMedia,
                     isPlaying = isPlaying,
                     scale = phoneMedia.scale,
                     offsetX = phoneMedia.offsetX * frameWidthPx * 0.35f,
@@ -437,6 +438,7 @@ private fun LivePreviewVideoFrame(
                     colorFilter = ColorFilter.colorMatrix(colorMatrix),
                     modifier = Modifier
                         .fillMaxSize()
+                        .testTag("live_preview_image_background_surface")
                         .graphicsLayer {
                             scaleX = phoneMedia.scale
                             scaleY = phoneMedia.scale
@@ -570,50 +572,181 @@ private fun expandRect(rect: RectF, pad: Float): RectF {
 @Composable
 private fun PhoneBackgroundVideoSurface(
     videoUriString: String,
+    phoneMedia: PhoneMediaBackground,
     isPlaying: Boolean,
     scale: Float,
     offsetX: Float,
     offsetY: Float
 ) {
     val context = LocalContext.current
+    val curatedRepo = remember(context) { com.example.data.CuratedBackgroundMediaRepository(context) }
+    val curatedItem = remember(phoneMedia.curatedItemId) {
+        curatedRepo.findItemById(phoneMedia.curatedItemId)
+            ?: curatedRepo.allItems.firstOrNull { it.isVideo }
+    }
+
+    var hasRenderedHardwareVideoFrame by remember(videoUriString) { mutableStateOf(false) }
+    var videoWidth by remember(videoUriString) { mutableStateOf(0) }
+    var videoHeight by remember(videoUriString) { mutableStateOf(0) }
+    var liveClockMs by remember { mutableStateOf(0L) }
+
+    // Continuous 30fps live animation clock so curated/procedural videos and fallback previews
+    // display smooth continuous motion in the fixed top editor preview at all times.
+    LaunchedEffect(videoUriString, phoneMedia.curatedItemId) {
+        val startNs = System.nanoTime()
+        while (true) {
+            androidx.compose.runtime.withFrameNanos { nowNs ->
+                liveClockMs = ((nowNs - startNs) / 1_000_000L).coerceAtLeast(0L)
+            }
+        }
+    }
+
     val bgPlayer = remember(videoUriString) {
         ExoPlayer.Builder(context).build().apply {
             volume = 0f // Muted background video; Quranic recitation is the audio track
-            repeatMode = Player.REPEAT_MODE_ALL
+            repeatMode = if (phoneMedia.loopVideoInExport) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
             setMediaItem(MediaItem.fromUri(Uri.parse(videoUriString)))
             prepare()
             playWhenReady = true
         }
     }
 
-    LaunchedEffect(isPlaying) {
-        bgPlayer.playWhenReady = true
-    }
-
     DisposableEffect(bgPlayer) {
+        val listener = object : Player.Listener {
+            override fun onRenderedFirstFrame() {
+                hasRenderedHardwareVideoFrame = true
+            }
+
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                if (videoSize.width > 0 && videoSize.height > 0) {
+                    videoWidth = videoSize.width
+                    videoHeight = videoSize.height
+                }
+            }
+        }
+        bgPlayer.addListener(listener)
         onDispose {
+            bgPlayer.removeListener(listener)
             bgPlayer.release()
         }
     }
 
-    AndroidView(
-        factory = { ctx ->
-            TextureView(ctx).also { textureView ->
-                bgPlayer.setVideoTextureView(textureView)
-            }
-        },
-        update = { textureView ->
-            bgPlayer.setVideoTextureView(textureView)
-        },
+    LaunchedEffect(phoneMedia.loopVideoInExport) {
+        bgPlayer.repeatMode = if (phoneMedia.loopVideoInExport) {
+            Player.REPEAT_MODE_ALL
+        } else {
+            Player.REPEAT_MODE_OFF
+        }
+    }
+
+    LaunchedEffect(isPlaying, videoUriString) {
+        if (!bgPlayer.isPlaying) {
+            bgPlayer.playWhenReady = true
+            bgPlayer.play()
+        }
+    }
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
+            .testTag("live_preview_video_background_surface")
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
                 translationX = offsetX
                 translationY = offsetY
             }
-    )
+    ) {
+        // Fallback / Curated Continuous Motion Canvas (visible for curated videos or before first hardware frame)
+        if (!hasRenderedHardwareVideoFrame && curatedItem != null) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val durMs = (phoneMedia.durationMs.takeIf { it > 0L } ?: 6000L).coerceAtLeast(1000L)
+                val effectiveMs = if (phoneMedia.loopVideoInExport) {
+                    liveClockMs % durMs
+                } else {
+                    liveClockMs.coerceAtMost(durMs)
+                }
+                val phase = (effectiveMs.toFloat() / durMs.toFloat()).coerceIn(0f, 1f)
+                drawIntoCanvas { composeCanvas ->
+                    curatedRepo.drawCuratedSceneFrame(
+                        canvas = composeCanvas.nativeCanvas,
+                        width = size.width.coerceAtLeast(1f),
+                        height = size.height.coerceAtLeast(1f),
+                        item = curatedItem,
+                        phase = phase
+                    )
+                }
+            }
+        }
+
+        // Hardware ExoPlayer TextureView for real phone & MP4 videos
+        AndroidView(
+            factory = { ctx ->
+                TextureView(ctx).also { textureView ->
+                    bgPlayer.setVideoTextureView(textureView)
+                }
+            },
+            update = { textureView ->
+                bgPlayer.setVideoTextureView(textureView)
+                applyTextureViewScaleMatrix(
+                    textureView = textureView,
+                    videoWidth = videoWidth,
+                    videoHeight = videoHeight,
+                    cropMode = phoneMedia.cropMode
+                )
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // Apply brightness shift overlay if non-zero
+        if (kotlin.math.abs(phoneMedia.brightness) > 0.01f) {
+            val alpha = kotlin.math.abs(phoneMedia.brightness).coerceIn(0f, 0.65f)
+            val tint = if (phoneMedia.brightness > 0f) Color.White.copy(alpha = alpha) else Color.Black.copy(alpha = alpha)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(tint)
+            )
+        }
+    }
+}
+
+private fun applyTextureViewScaleMatrix(
+    textureView: TextureView,
+    videoWidth: Int,
+    videoHeight: Int,
+    cropMode: MediaCropMode
+) {
+    val viewW = textureView.width.toFloat()
+    val viewH = textureView.height.toFloat()
+    if (viewW <= 0f || viewH <= 0f || videoWidth <= 0 || videoHeight <= 0) return
+
+    val videoRatio = videoWidth.toFloat() / videoHeight.toFloat()
+    val viewRatio = viewW / viewH
+
+    var scaleX = 1f
+    var scaleY = 1f
+
+    when (cropMode) {
+        MediaCropMode.CENTER_CROP, MediaCropMode.CUSTOM_PAN_ZOOM -> {
+            if (videoRatio > viewRatio) {
+                scaleX = videoRatio / viewRatio
+            } else {
+                scaleY = viewRatio / videoRatio
+            }
+        }
+        MediaCropMode.FIT_CENTER -> {
+            if (videoRatio > viewRatio) {
+                scaleY = viewRatio / videoRatio
+            } else {
+                scaleX = videoRatio / viewRatio
+            }
+        }
+    }
+
+    val matrix = android.graphics.Matrix()
+    matrix.setScale(scaleX, scaleY, viewW / 2f, viewH / 2f)
+    textureView.setTransform(matrix)
 }
 
 fun formatMillis(ms: Long): String {

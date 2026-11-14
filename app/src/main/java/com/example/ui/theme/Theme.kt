@@ -6,18 +6,22 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 
 data class TasneemExtendedColors(
+    val colorTheme: AppColorTheme = AppColorTheme.TASNEEM_ORANGE_SILVER,
     val backgroundStyle: InterfaceBackgroundStyle,
     val isDark: Boolean,
     val screenBackground: Color,
     val cardBackground: Color,
     val elevatedSurface: Color,
     val primaryAccent: Color,
+    val secondaryAccent: Color = TasneemOrangeLight,
+    val onPrimaryAccent: Color = TasneemDeepCharcoal,
     val textPrimary: Color,
     val textSecondary: Color,
     val borderSubtle: Color
@@ -25,12 +29,15 @@ data class TasneemExtendedColors(
 
 val LocalTasneemColors = staticCompositionLocalOf {
     TasneemExtendedColors(
+        colorTheme = AppColorTheme.TASNEEM_ORANGE_SILVER,
         backgroundStyle = InterfaceBackgroundStyle.DEEP_CHARCOAL,
         isDark = true,
         screenBackground = TasneemDeepCharcoal,
         cardBackground = TasneemDarkSilver,
         elevatedSurface = Color(0xFF282E34),
-        primaryAccent = TasneemOrange,
+        primaryAccent = TasneemBrandOrange,
+        secondaryAccent = TasneemOrangeLight,
+        onPrimaryAccent = TasneemDeepCharcoal,
         textPrimary = TasneemWhite,
         textSecondary = TasneemSilverGray,
         borderSubtle = Color(0x33C5C8CB)
@@ -41,6 +48,7 @@ val LocalTasneemColors = staticCompositionLocalOf {
 fun TasneemTheme(
     themeMode: AppThemeMode = AppThemeMode.DARK,
     backgroundStyle: InterfaceBackgroundStyle = InterfaceBackgroundStyle.DEEP_CHARCOAL,
+    colorTheme: AppColorTheme = AppColorTheme.TASNEEM_ORANGE_SILVER,
     content: @Composable () -> Unit
 ) {
     val systemDark = isSystemInDarkTheme()
@@ -48,6 +56,13 @@ fun TasneemTheme(
         AppThemeMode.LIGHT -> false
         AppThemeMode.DARK -> true
         AppThemeMode.SYSTEM -> systemDark
+    }
+
+    // Keep reactive TasneemOrange in sync with the active colorTheme
+    // (When TASNEEM_ORANGE_SILVER is active, TasneemOrange == TasneemBrandOrange #E8872F)
+    TasneemOrange = colorTheme.primaryAccent
+    SideEffect {
+        TasneemOrange = colorTheme.primaryAccent
     }
 
     // Harmonize the selected interface style with the active light/dark mode while preserving Tasneem palette
@@ -62,56 +77,101 @@ fun TasneemTheme(
         else -> backgroundStyle
     }
 
+    val isDefaultTheme = colorTheme == AppColorTheme.TASNEEM_ORANGE_SILVER
+
+    val resolvedScreenBg = if (isDefaultTheme) {
+        effectiveStyle.primaryBackground
+    } else if (useDark) {
+        colorTheme.darkBackground
+    } else {
+        colorTheme.lightBackground
+    }
+
+    val resolvedElevatedSurface = if (isDefaultTheme) {
+        effectiveStyle.secondarySurface
+    } else if (useDark) {
+        colorTheme.darkSecondarySurface
+    } else {
+        colorTheme.lightSecondarySurface
+    }
+
+    val resolvedCardSurface = if (isDefaultTheme) {
+        effectiveStyle.cardSurface
+    } else if (useDark) {
+        colorTheme.darkCardSurface
+    } else {
+        colorTheme.lightCardSurface
+    }
+
+    val resolvedTextPrimary = if (isDefaultTheme) {
+        effectiveStyle.textPrimary
+    } else if (useDark) {
+        colorTheme.darkTextPrimary
+    } else {
+        colorTheme.lightTextPrimary
+    }
+
+    val resolvedTextSecondary = if (isDefaultTheme) {
+        effectiveStyle.textSecondary
+    } else if (useDark) {
+        colorTheme.darkTextSecondary
+    } else {
+        colorTheme.lightTextSecondary
+    }
+
     val colorScheme = if (useDark) {
         darkColorScheme(
-            primary = TasneemOrange,
-            onPrimary = TasneemDeepCharcoal,
-            primaryContainer = TasneemDarkSilver,
-            onPrimaryContainer = TasneemSoftIvory,
-            secondary = TasneemSilverGray,
-            onSecondary = TasneemDeepCharcoal,
-            secondaryContainer = TasneemDarkSilver,
-            onSecondaryContainer = TasneemWhite,
-            tertiary = TasneemOrange,
-            background = effectiveStyle.primaryBackground,
-            onBackground = effectiveStyle.textPrimary,
-            surface = effectiveStyle.secondarySurface,
-            onSurface = effectiveStyle.textPrimary,
-            surfaceVariant = effectiveStyle.cardSurface,
-            onSurfaceVariant = effectiveStyle.textSecondary,
-            outline = TasneemSilverGray.copy(alpha = 0.35f)
+            primary = colorTheme.primaryAccent,
+            onPrimary = colorTheme.onPrimaryDark,
+            primaryContainer = resolvedElevatedSurface,
+            onPrimaryContainer = resolvedTextPrimary,
+            secondary = colorTheme.secondaryAccent,
+            onSecondary = colorTheme.onPrimaryDark,
+            secondaryContainer = resolvedCardSurface,
+            onSecondaryContainer = resolvedTextPrimary,
+            tertiary = colorTheme.primaryAccent,
+            background = resolvedScreenBg,
+            onBackground = resolvedTextPrimary,
+            surface = resolvedElevatedSurface,
+            onSurface = resolvedTextPrimary,
+            surfaceVariant = resolvedCardSurface,
+            onSurfaceVariant = resolvedTextSecondary,
+            outline = resolvedTextSecondary.copy(alpha = 0.35f)
         )
     } else {
         lightColorScheme(
-            primary = TasneemOrange,
+            primary = colorTheme.primaryAccent,
             onPrimary = TasneemWhite,
-            primaryContainer = TasneemSoftIvory,
-            onPrimaryContainer = TasneemDeepCharcoal,
-            secondary = TasneemDarkSilver,
-            onSecondary = TasneemWhite,
-            secondaryContainer = TasneemSilverGray.copy(alpha = 0.35f),
-            onSecondaryContainer = TasneemDeepCharcoal,
-            tertiary = TasneemOrange,
-            background = effectiveStyle.primaryBackground,
-            onBackground = effectiveStyle.textPrimary,
-            surface = effectiveStyle.secondarySurface,
-            onSurface = effectiveStyle.textPrimary,
-            surfaceVariant = effectiveStyle.cardSurface,
-            onSurfaceVariant = effectiveStyle.textSecondary,
-            outline = TasneemDarkSilver.copy(alpha = 0.25f)
+            primaryContainer = resolvedElevatedSurface,
+            onPrimaryContainer = resolvedTextPrimary,
+            secondary = colorTheme.secondaryAccent,
+            onSecondary = resolvedTextPrimary,
+            secondaryContainer = resolvedCardSurface,
+            onSecondaryContainer = resolvedTextPrimary,
+            tertiary = colorTheme.primaryAccent,
+            background = resolvedScreenBg,
+            onBackground = resolvedTextPrimary,
+            surface = resolvedElevatedSurface,
+            onSurface = resolvedTextPrimary,
+            surfaceVariant = resolvedCardSurface,
+            onSurfaceVariant = resolvedTextSecondary,
+            outline = resolvedTextSecondary.copy(alpha = 0.25f)
         )
     }
 
     val extendedColors = TasneemExtendedColors(
+        colorTheme = colorTheme,
         backgroundStyle = backgroundStyle,
         isDark = useDark,
-        screenBackground = effectiveStyle.primaryBackground,
-        cardBackground = effectiveStyle.cardSurface,
-        elevatedSurface = effectiveStyle.secondarySurface,
-        primaryAccent = TasneemOrange,
-        textPrimary = effectiveStyle.textPrimary,
-        textSecondary = effectiveStyle.textSecondary,
-        borderSubtle = if (useDark) TasneemSilverGray.copy(alpha = 0.2f) else TasneemDarkSilver.copy(alpha = 0.16f)
+        screenBackground = resolvedScreenBg,
+        cardBackground = resolvedCardSurface,
+        elevatedSurface = resolvedElevatedSurface,
+        primaryAccent = colorTheme.primaryAccent,
+        secondaryAccent = colorTheme.secondaryAccent,
+        onPrimaryAccent = colorTheme.onPrimaryDark,
+        textPrimary = resolvedTextPrimary,
+        textSecondary = resolvedTextSecondary,
+        borderSubtle = if (useDark) resolvedTextSecondary.copy(alpha = 0.22f) else resolvedTextSecondary.copy(alpha = 0.18f)
     )
 
     // Enforce Right-To-Left (RTL) layout across the entire application

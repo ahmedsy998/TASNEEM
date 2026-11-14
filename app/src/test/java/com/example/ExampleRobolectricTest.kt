@@ -672,4 +672,272 @@ class ExampleRobolectricTest {
         }
         return modified
     }
+
+    @Test
+    fun test13_videoBackgroundRenderingFix_movingVideoFrames_loopingTrimmingAndExportValidation() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        val curatedRepo = com.example.data.CuratedBackgroundMediaRepository(app)
+        val mediaImportManager = com.example.media.PhoneMediaImportManager(app)
+        val frameRenderer = com.example.media.VideoFrameCanvasRenderer(app)
+        val mp4Engine = com.example.media.Mp4VideoRenderEngine(app, mediaImportManager, frameRenderer, curatedRepo)
+        val quranRepo = QuranDataRepository(app)
+
+        val verses = quranRepo.getSelectedVerses(112, 1, 4).getOrThrow()
+        val audioSegments = verses.mapIndexed { idx, v ->
+            val segFile = File(app.cacheDir, "test_ayah_${v.verseNumber}.mp3").apply { writeBytes(ByteArray(2048)) }
+            VerseAudioSegment(
+                surahNumber = 112,
+                verseNumber = v.verseNumber,
+                sourceUrl = "https://everyayah.com/data/Fares_Abbad_64kbps/11200${v.verseNumber}.mp3",
+                localFilePath = segFile.absolutePath,
+                durationMs = 2500L,
+                startOffsetMs = idx * 2500L,
+                endOffsetMs = (idx + 1) * 2500L
+            )
+        }
+        val totalRecitationMs = audioSegments.last().endOffsetMs // 10,000 ms
+
+        // 1. Verify Image Background still works as a static background throughout complete recitation
+        val imageItem = curatedRepo.allItems.first { !it.isVideo }
+        val preparedImageBg = curatedRepo.prepareAndCacheMediaItem(imageItem)
+        assertFalse(preparedImageBg.isVideo)
+
+        val imgBgFrame1 = mp4Engine.extractBackgroundBitmapAtTimeMs(
+            mediaBackground = preparedImageBg,
+            currentRecitationTimeMs = 200L,
+            totalRecitationDurationMs = totalRecitationMs,
+            targetWidth = 360,
+            targetHeight = 640
+        )
+        val imgBgFrame2 = mp4Engine.extractBackgroundBitmapAtTimeMs(
+            mediaBackground = preparedImageBg,
+            currentRecitationTimeMs = 4200L,
+            totalRecitationDurationMs = totalRecitationMs,
+            targetWidth = 360,
+            targetHeight = 640
+        )
+        assertNotNull(imgBgFrame1)
+        assertNotNull(imgBgFrame2)
+        assertTrue(
+            "Static image background must remain identical across timestamps",
+            mp4Engine.areBitmapsVisuallyIdentical(imgBgFrame1!!, imgBgFrame2!!)
+        )
+
+        var imageExportCompleted: com.example.model.VideoExportState.Completed? = null
+        mp4Engine.renderCompleteMp4Video(
+            surahNameAr = "الإخلاص",
+            verses = verses,
+            audioSegments = audioSegments,
+            reciterNameAr = "فارس عباد",
+            mediaBackground = preparedImageBg,
+            textStyleConfig = QuranTextStyleConfig(),
+            watermarkConfig = WatermarkConfig(),
+            resolution = VideoResolution.RES_720P,
+            aspectRatio = VideoAspectRatio.PORTRAIT_9_16
+        ).collect { state ->
+            if (state is com.example.model.VideoExportState.Completed) {
+                imageExportCompleted = state
+            }
+        }
+        assertNotNull("Image background MP4 export must succeed", imageExportCompleted)
+        assertTrue(imageExportCompleted!!.validationReport.isSuccess)
+        assertTrue(imageExportCompleted!!.validationReport.hasVideoStream)
+        assertTrue(imageExportCompleted!!.validationReport.hasAudioStream)
+        assertTrue(imageExportCompleted!!.validationReport.completeAudioPresent)
+
+        // 2. Verify Video Background is preserved as a genuine MP4 video (NOT converted to a static JPEG)
+        val videoItem = curatedRepo.allItems.first { it.isVideo }
+        val preparedVideoBg = curatedRepo.prepareAndCacheMediaItem(videoItem)
+        assertTrue("Selected video background must have isVideo=true", preparedVideoBg.isVideo)
+        val videoFile = File(android.net.Uri.parse(preparedVideoBg.uriString).path!!)
+        assertTrue("Cached video background must be a valid MP4 container, never a static JPEG", curatedRepo.isValidMp4VideoContainer(videoFile))
+
+        // Also test importing a video from phone storage via PhoneMediaImportManager
+        val phoneVideoFile = File(app.cacheDir, "phone_sample_video.mp4")
+        curatedRepo.writeFallbackMultiFrameMp4Container(
+            outputFile = phoneVideoFile,
+            width = 720,
+            height = 1280,
+            durationMs = 4000L,
+            fps = 15,
+            seedTag = "phone_camera_clip"
+        )
+        val importedPhoneVideo = mediaImportManager.importMediaUri(
+            uri = android.net.Uri.fromFile(phoneVideoFile),
+            expectedVideo = true,
+            previousSettings = preparedVideoBg
+        ).getOrThrow()
+        assertTrue("Phone video import must preserve isVideo=true", importedPhoneVideo.isVideo)
+        assertTrue("Phone video duration must be extracted (> 0ms)", importedPhoneVideo.durationMs >= 1000L)
+
+        // 3. Verify extracted video frames & rendered composite frames CHANGE across time (not frozen on frame 0!)
+        val vidBgFrameT1 = mp4Engine.extractBackgroundBitmapAtTimeMs(
+            mediaBackground = preparedVideoBg,
+            currentRecitationTimeMs = 100L,
+            totalRecitationDurationMs = totalRecitationMs,
+            targetWidth = 360,
+            targetHeight = 640
+        )!!
+        val vidBgFrameT2 = mp4Engine.extractBackgroundBitmapAtTimeMs(
+            mediaBackground = preparedVideoBg,
+            currentRecitationTimeMs = 1800L,
+            totalRecitationDurationMs = totalRecitationMs,
+            targetWidth = 360,
+            targetHeight = 640
+        )!!
+        val vidBgFrameT3 = mp4Engine.extractBackgroundBitmapAtTimeMs(
+            mediaBackground = preparedVideoBg,
+            currentRecitationTimeMs = 3500L,
+            totalRecitationDurationMs = totalRecitationMs,
+            targetWidth = 360,
+            targetHeight = 640
+        )!!
+        assertFalse(
+            "Video background frames at t=100ms and t=1800ms must NOT be frozen/identical",
+            mp4Engine.areBitmapsVisuallyIdentical(vidBgFrameT1, vidBgFrameT2)
+        )
+        assertFalse(
+            "Video background frames at t=1800ms and t=3500ms must NOT be frozen/identical",
+            mp4Engine.areBitmapsVisuallyIdentical(vidBgFrameT2, vidBgFrameT3)
+        )
+
+        val compFrame1 = mp4Engine.renderCompositeFrameBitmapAtTimeMs(
+            currentRecitationTimeMs = 150L,
+            totalRecitationDurationMs = totalRecitationMs,
+            width = 360,
+            height = 640,
+            surahNameAr = "الإخلاص",
+            verses = verses,
+            audioSegments = audioSegments,
+            reciterNameAr = "فارس عباد",
+            mediaBackground = preparedVideoBg,
+            textStyleConfig = QuranTextStyleConfig()
+        )
+        val compFrame2 = mp4Engine.renderCompositeFrameBitmapAtTimeMs(
+            currentRecitationTimeMs = 2100L,
+            totalRecitationDurationMs = totalRecitationMs,
+            width = 360,
+            height = 640,
+            surahNameAr = "الإخلاص",
+            verses = verses,
+            audioSegments = audioSegments,
+            reciterNameAr = "فارس عباد",
+            mediaBackground = preparedVideoBg,
+            textStyleConfig = QuranTextStyleConfig()
+        )
+        assertFalse(
+            "Composite rendered video frames at different timestamps must change continuously",
+            mp4Engine.areBitmapsVisuallyIdentical(compFrame1, compFrame2)
+        )
+
+        // 4. Verify looping when background video is shorter than recitation & trimming when longer
+        val loopedMs = mp4Engine.computeEffectiveBackgroundVideoTimeMs(
+            currentRecitationTimeMs = 7500L,
+            backgroundVideoDurationMs = 5000L,
+            totalRecitationDurationMs = 15000L,
+            loopVideo = true
+        )
+        assertEquals("Shorter 5s background video at 7.5s recitation mark must loop smoothly to 2.5s", 2500L, loopedMs)
+
+        val trimmedMs = mp4Engine.computeEffectiveBackgroundVideoTimeMs(
+            currentRecitationTimeMs = 8000L,
+            backgroundVideoDurationMs = 20000L,
+            totalRecitationDurationMs = 8000L,
+            loopVideo = true
+        )
+        assertEquals("Longer 20s background video with 8s recitation must trim cleanly at 8s", 8000L, trimmedMs)
+
+        // 5. Render full MP4 with moving video background and verify export validation report
+        var videoExportCompleted: com.example.model.VideoExportState.Completed? = null
+        mp4Engine.renderCompleteMp4Video(
+            surahNameAr = "الإخلاص",
+            verses = verses,
+            audioSegments = audioSegments,
+            reciterNameAr = "فارس عباد",
+            mediaBackground = preparedVideoBg,
+            textStyleConfig = QuranTextStyleConfig(),
+            watermarkConfig = WatermarkConfig(),
+            resolution = VideoResolution.RES_720P,
+            aspectRatio = VideoAspectRatio.PORTRAIT_9_16
+        ).collect { state ->
+            if (state is com.example.model.VideoExportState.Completed) {
+                videoExportCompleted = state
+            }
+        }
+        assertNotNull("Moving video background MP4 export must succeed", videoExportCompleted)
+        val report = videoExportCompleted!!.validationReport
+        assertTrue(report.isSuccess)
+        assertTrue(report.hasVideoStream)
+        assertTrue(report.hasAudioStream)
+        assertTrue(report.completeAudioPresent)
+        assertTrue("Exported MP4 must contain multiple video frames (got ${report.videoFrameCount})", report.videoFrameCount >= 15)
+        assertTrue("Exported MP4 must validate changing video frames", report.hasChangingVideoFrames)
+    }
+
+    @Test
+    fun test14_additionalHarmoniousColorThemes_defaultPreserved_switchingAndPersistence() {
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        app.getSharedPreferences("tasneem_appearance_sync_prefs", Context.MODE_PRIVATE).edit().clear().commit()
+
+        // 1. Verify Default Theme is Orange & Dark Silver (#E8872F & #343A40 / #1D2227) and is unchanged
+        val initialThemeManager = com.example.data.ThemeManager(app)
+        assertEquals(
+            com.example.ui.theme.AppColorTheme.TASNEEM_ORANGE_SILVER,
+            initialThemeManager.getInitialColorTheme()
+        )
+        assertEquals(
+            com.example.ui.theme.TasneemBrandOrange,
+            com.example.ui.theme.AppColorTheme.TASNEEM_ORANGE_SILVER.primaryAccent
+        )
+        assertEquals(
+            com.example.ui.theme.TasneemDeepCharcoal,
+            com.example.ui.theme.AppColorTheme.TASNEEM_ORANGE_SILVER.darkBackground
+        )
+        assertEquals(
+            com.example.ui.theme.TasneemDarkSilver,
+            com.example.ui.theme.AppColorTheme.TASNEEM_ORANGE_SILVER.darkSecondarySurface
+        )
+
+        // 2. Verify all 6 themes exist (Default + 5 harmonious optional themes: Turquoise, Yellow, Teal, Warm Gold, Ocean)
+        val allThemes = com.example.ui.theme.AppColorTheme.entries
+        assertEquals(6, allThemes.size)
+        assertTrue(allThemes.contains(com.example.ui.theme.AppColorTheme.TASNEEM_ORANGE_SILVER))
+        assertTrue(allThemes.contains(com.example.ui.theme.AppColorTheme.TURQUOISE))
+        assertTrue(allThemes.contains(com.example.ui.theme.AppColorTheme.WARM_YELLOW))
+        assertTrue(allThemes.contains(com.example.ui.theme.AppColorTheme.DEEP_TEAL))
+        assertTrue(allThemes.contains(com.example.ui.theme.AppColorTheme.WARM_GOLD))
+        assertTrue(allThemes.contains(com.example.ui.theme.AppColorTheme.OCEAN_BLUE))
+
+        // 3. Switch between all available color themes via ViewModel and verify reactive palette updates
+        val vm = com.example.viewmodel.TasneemViewModel(app)
+        assertEquals(com.example.ui.theme.AppColorTheme.TASNEEM_ORANGE_SILVER, vm.colorTheme.value)
+
+        for (theme in allThemes) {
+            vm.updateColorTheme(theme)
+            assertEquals("ViewModel colorTheme must update to ${theme.id}", theme, vm.colorTheme.value)
+            assertEquals(
+                "Reactive TasneemOrange accent must match active theme ${theme.id}",
+                theme.primaryAccent,
+                com.example.ui.theme.TasneemOrange
+            )
+        }
+
+        // 4. Select Deep Teal theme, simulate closing and reopening the application, and verify persistence
+        vm.updateColorTheme(com.example.ui.theme.AppColorTheme.DEEP_TEAL)
+        val restartedThemeManager = com.example.data.ThemeManager(app)
+        assertEquals(
+            "Selected color theme must be restored after application restart",
+            com.example.ui.theme.AppColorTheme.DEEP_TEAL,
+            restartedThemeManager.getInitialColorTheme()
+        )
+        val restartedVm = com.example.viewmodel.TasneemViewModel(app)
+        assertEquals(
+            com.example.ui.theme.AppColorTheme.DEEP_TEAL,
+            restartedVm.colorTheme.value
+        )
+
+        // Restore default theme at end of test
+        restartedVm.updateColorTheme(com.example.ui.theme.AppColorTheme.TASNEEM_ORANGE_SILVER)
+        assertEquals(com.example.ui.theme.TasneemBrandOrange, com.example.ui.theme.TasneemOrange)
+    }
 }

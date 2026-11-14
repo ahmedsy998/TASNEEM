@@ -46,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.AmiriFontFamily
+import com.example.ui.theme.AppColorTheme
 import com.example.ui.theme.AppThemeMode
 import com.example.ui.theme.InterfaceBackgroundStyle
 import com.example.ui.theme.LocalTasneemColors
@@ -101,7 +102,7 @@ fun TasneemTopBar(
                         fontFamily = AmiriFontFamily,
                         fontWeight = FontWeight.Bold,
                         fontSize = 24.sp,
-                        color = TasneemOrange,
+                        color = colors.primaryAccent,
                         lineHeight = 26.sp
                     )
                     Text(
@@ -118,7 +119,7 @@ fun TasneemTopBar(
                 color = colors.cardBackground,
                 border = androidx.compose.foundation.BorderStroke(
                     width = 1.dp,
-                    color = TasneemOrange.copy(alpha = 0.55f)
+                    color = colors.primaryAccent.copy(alpha = 0.55f)
                 ),
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))
@@ -132,7 +133,7 @@ fun TasneemTopBar(
                     Icon(
                         imageVector = Icons.Default.Palette,
                         contentDescription = "المظهر",
-                        tint = TasneemOrange,
+                        tint = colors.primaryAccent,
                         modifier = Modifier.size(18.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
@@ -156,12 +157,15 @@ fun TasneemGeometricLogo(
     sizeDp: Int = 44,
     modifier: Modifier = Modifier
 ) {
+    val colors = LocalTasneemColors.current
+    val activeAccent = colors.primaryAccent
+
     Box(
         modifier = modifier
             .size(sizeDp.dp)
             .clip(RoundedCornerShape(12.dp))
             .background(TasneemDeepCharcoal)
-            .border(1.dp, TasneemOrange.copy(alpha = 0.65f), RoundedCornerShape(12.dp)),
+            .border(1.dp, activeAccent.copy(alpha = 0.65f), RoundedCornerShape(12.dp)),
         contentAlignment = Alignment.Center
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
@@ -183,7 +187,7 @@ fun TasneemGeometricLogo(
 
             drawPath(
                 path = starPath,
-                color = TasneemOrange,
+                color = activeAccent,
                 style = Stroke(width = size.minDimension * 0.055f)
             )
 
@@ -205,7 +209,7 @@ fun TasneemGeometricLogo(
 
             // Small glowing droplet/play crown above the pages representing Tasneem spring
             drawCircle(
-                color = TasneemOrange,
+                color = activeAccent,
                 radius = size.minDimension * 0.07f,
                 center = Offset(cx, cy - outerR * 0.26f)
             )
@@ -222,6 +226,7 @@ fun TasneemBackgroundContainer(
     content: @Composable () -> Unit
 ) {
     val colors = LocalTasneemColors.current
+    val activeAccent = colors.primaryAccent
 
     Box(
         modifier = modifier
@@ -233,7 +238,7 @@ fun TasneemBackgroundContainer(
                 val step = 96.dp.toPx()
                 val cols = (size.width / step).toInt() + 2
                 val rows = (size.height / step).toInt() + 2
-                val strokeColor = TasneemOrange.copy(alpha = 0.055f)
+                val strokeColor = activeAccent.copy(alpha = 0.055f)
 
                 for (r in 0..rows) {
                     for (c in 0..cols) {
@@ -260,16 +265,19 @@ fun TasneemBackgroundContainer(
 }
 
 /**
- * Appearance and Theme System Bottom Sheet (Section 14).
- * Provides Light Mode, Dark Mode, System Default Mode, and 7 Islamic-inspired interface styles.
+ * Appearance and Theme System Bottom Sheet (Section 14 & Harmonious Color Themes Update).
+ * Provides Light Mode, Dark Mode, System Default Mode, 6 Coordinated Color Themes (Default Orange/Silver
+ * + Turquoise, Warm Yellow, Deep Teal, Warm Gold, Ocean Blue), and 7 Islamic-inspired interface styles.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppearanceBottomSheet(
     currentThemeMode: AppThemeMode,
     currentBackgroundStyle: InterfaceBackgroundStyle,
+    currentColorTheme: AppColorTheme = AppColorTheme.TASNEEM_ORANGE_SILVER,
     onSelectThemeMode: (AppThemeMode) -> Unit,
     onSelectBackgroundStyle: (InterfaceBackgroundStyle) -> Unit,
+    onSelectColorTheme: (AppColorTheme) -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val colors = LocalTasneemColors.current
@@ -286,7 +294,7 @@ fun AppearanceBottomSheet(
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp),
             contentPadding = PaddingValues(bottom = 36.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             item {
                 Row(
@@ -296,16 +304,16 @@ fun AppearanceBottomSheet(
                     Icon(
                         imageVector = Icons.Default.Palette,
                         contentDescription = null,
-                        tint = TasneemOrange
+                        tint = colors.primaryAccent
                     )
                     Column {
                         Text(
-                            text = "إعدادات المظهر والواجهة",
+                            text = "إعدادات المظهر والثيمات اللونية",
                             style = MaterialTheme.typography.titleLarge,
                             color = colors.textPrimary
                         )
                         Text(
-                            text = "معاينة فورية لألوان وهوية تطبيق تسنيم",
+                            text = "اختر ثيم الألوان المتناسق أو نمط إضاءة الواجهة مع معاينة فورية",
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.textSecondary
                         )
@@ -315,9 +323,32 @@ fun AppearanceBottomSheet(
 
             item {
                 Text(
+                    text = "ثيمات الألوان المتناسقة",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = colors.primaryAccent
+                )
+                Text(
+                    text = "الثيم البرتقالي والفضي الداكن هو الثيم الافتراضي، مع ٥ ثيمات إضافية متناسقة ومريحة للعين",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.textSecondary
+                )
+            }
+
+            items(AppColorTheme.entries) { theme ->
+                val isSelected = theme == currentColorTheme
+                ColorThemePreviewCard(
+                    theme = theme,
+                    isSelected = isSelected,
+                    onClick = { onSelectColorTheme(theme) }
+                )
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
                     text = "وضع الإضاءة",
                     style = MaterialTheme.typography.titleMedium,
-                    color = TasneemOrange
+                    color = colors.primaryAccent
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
@@ -328,10 +359,10 @@ fun AppearanceBottomSheet(
                         val isSelected = mode == currentThemeMode
                         Surface(
                             shape = RoundedCornerShape(12.dp),
-                            color = if (isSelected) TasneemOrange else colors.cardBackground,
+                            color = if (isSelected) colors.primaryAccent else colors.cardBackground,
                             border = androidx.compose.foundation.BorderStroke(
                                 width = 1.dp,
-                                color = if (isSelected) TasneemOrange else colors.borderSubtle
+                                color = if (isSelected) colors.primaryAccent else colors.borderSubtle
                             ),
                             modifier = Modifier
                                 .weight(1f)
@@ -346,7 +377,7 @@ fun AppearanceBottomSheet(
                                 Text(
                                     text = mode.titleAr,
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = if (isSelected) TasneemDeepCharcoal else colors.textPrimary
+                                    color = if (isSelected) colors.onPrimaryAccent else colors.textPrimary
                                 )
                             }
                         }
@@ -355,13 +386,14 @@ fun AppearanceBottomSheet(
             }
 
             item {
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = "أنماط خلفية الواجهة الإسلامية",
                     style = MaterialTheme.typography.titleMedium,
-                    color = TasneemOrange
+                    color = colors.primaryAccent
                 )
                 Text(
-                    text = "تطبق هذه الأنماط على واجهة التطبيق مع الحفاظ على الهوية البرتقالية والفضية المعتمدة",
+                    text = "تطبق هذه الأنماط على خلفية الواجهة والبطاقات بتناغم مع الثيم المختار",
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.textSecondary
                 )
@@ -374,7 +406,7 @@ fun AppearanceBottomSheet(
                     color = colors.cardBackground,
                     border = androidx.compose.foundation.BorderStroke(
                         width = if (isSelected) 2.dp else 1.dp,
-                        color = if (isSelected) TasneemOrange else colors.borderSubtle
+                        color = if (isSelected) colors.primaryAccent else colors.borderSubtle
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -406,14 +438,14 @@ fun AppearanceBottomSheet(
                                     .size(40.dp)
                                     .clip(CircleShape)
                                     .background(style.primaryBackground)
-                                    .border(2.dp, TasneemOrange, CircleShape),
+                                    .border(2.dp, colors.primaryAccent, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Box(
                                     modifier = Modifier
                                         .size(14.dp)
                                         .clip(CircleShape)
-                                        .background(TasneemOrange)
+                                        .background(colors.primaryAccent)
                                 )
                             }
                             Column {
@@ -434,12 +466,136 @@ fun AppearanceBottomSheet(
                             Icon(
                                 imageVector = Icons.Default.CheckCircle,
                                 contentDescription = "مفعل",
-                                tint = TasneemOrange,
+                                tint = colors.primaryAccent,
                                 modifier = Modifier.size(24.dp)
                             )
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Visual Theme Preview Card showing coordinated swatches (dark charcoal surface, elevated card surface,
+ * primary accent, secondary accent, and soft neutral text) before selection.
+ */
+@Composable
+private fun ColorThemePreviewCard(
+    theme: AppColorTheme,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    val colors = LocalTasneemColors.current
+
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = colors.cardBackground,
+        border = androidx.compose.foundation.BorderStroke(
+            width = if (isSelected) 2.dp else 1.dp,
+            color = if (isSelected) theme.primaryAccent else colors.borderSubtle
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .testTag("color_theme_${theme.id}")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                // Mini UI Theme Visual Preview Swatch
+                Box(
+                    modifier = Modifier
+                        .size(width = 62.dp, height = 46.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(theme.darkBackground)
+                        .border(1.5.dp, theme.primaryAccent, RoundedCornerShape(10.dp))
+                        .padding(5.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        // Top bar preview strip
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 22.dp, height = 7.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(theme.primaryAccent)
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(theme.secondaryAccent)
+                            )
+                        }
+                        // Card & text contrast preview strip
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(18.dp)
+                                .clip(RoundedCornerShape(5.dp))
+                                .background(theme.darkCardSurface)
+                                .padding(horizontal = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 24.dp, height = 4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                                    .background(theme.darkTextPrimary)
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(theme.primaryAccent)
+                            )
+                        }
+                    }
+                }
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = theme.titleAr,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (isSelected) theme.primaryAccent else colors.textPrimary
+                    )
+                    Text(
+                        text = theme.subtitleAr,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textSecondary
+                    )
+                }
+            }
+
+            if (isSelected) {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "الثيم المفعل",
+                    tint = theme.primaryAccent,
+                    modifier = Modifier
+                        .padding(start = 8.dp)
+                        .size(24.dp)
+                )
             }
         }
     }

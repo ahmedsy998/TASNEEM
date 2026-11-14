@@ -48,6 +48,7 @@ import com.example.model.VideoExportState
 import com.example.model.VideoResolution
 import com.example.model.WatermarkConfig
 import com.example.model.WatermarkPresetPosition
+import com.example.ui.theme.AppColorTheme
 import com.example.ui.theme.AppThemeMode
 import com.example.ui.theme.InterfaceBackgroundStyle
 import kotlinx.coroutines.Job
@@ -117,18 +118,24 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     private val syncEngine = QuranSynchronizationEngine(appContext, viewModelScope)
     val mediaImportManager = PhoneMediaImportManager(appContext)
     val frameRenderer = VideoFrameCanvasRenderer(appContext)
-    private val mp4RenderEngine = Mp4VideoRenderEngine(appContext, mediaImportManager, frameRenderer)
+    val mp4RenderEngine = Mp4VideoRenderEngine(appContext, mediaImportManager, frameRenderer, curatedMediaRepository)
 
     val themeMode: StateFlow<AppThemeMode> = themeManager.themeModeFlow.stateIn(
         viewModelScope,
-        SharingStarted.WhileSubscribed(5000),
-        AppThemeMode.DARK
+        SharingStarted.Eagerly,
+        themeManager.getInitialThemeMode()
     )
 
     val backgroundStyle: StateFlow<InterfaceBackgroundStyle> = themeManager.backgroundStyleFlow.stateIn(
         viewModelScope,
-        SharingStarted.WhileSubscribed(5000),
-        InterfaceBackgroundStyle.DEEP_CHARCOAL
+        SharingStarted.Eagerly,
+        themeManager.getInitialBackgroundStyle()
+    )
+
+    val colorTheme: StateFlow<AppColorTheme> = themeManager.colorThemeFlow.stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
+        themeManager.getInitialColorTheme()
     )
 
     val playbackSyncState: StateFlow<PlaybackSyncState> = syncEngine.syncState
@@ -227,6 +234,13 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     fun updateBackgroundStyle(style: InterfaceBackgroundStyle) {
         viewModelScope.launch {
             themeManager.setBackgroundStyle(style)
+        }
+    }
+
+    fun updateColorTheme(theme: AppColorTheme) {
+        themeManager.saveColorThemeSync(theme)
+        viewModelScope.launch {
+            themeManager.setColorTheme(theme)
         }
     }
 

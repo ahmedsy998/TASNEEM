@@ -38,13 +38,15 @@ fun TasneemApp(
 ) {
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val backgroundStyle by viewModel.backgroundStyle.collectAsStateWithLifecycle()
+    val colorTheme by viewModel.colorTheme.collectAsStateWithLifecycle()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val playbackSyncState by viewModel.playbackSyncState.collectAsStateWithLifecycle()
     val previewReciterId by viewModel.previewReciterId.collectAsStateWithLifecycle()
 
     TasneemTheme(
         themeMode = themeMode,
-        backgroundStyle = backgroundStyle
+        backgroundStyle = backgroundStyle,
+        colorTheme = colorTheme
     ) {
         TasneemBackgroundContainer(modifier = Modifier.fillMaxSize()) {
             Column(modifier = Modifier.fillMaxSize()) {
@@ -86,8 +88,10 @@ fun TasneemApp(
                 AppearanceBottomSheet(
                     currentThemeMode = themeMode,
                     currentBackgroundStyle = backgroundStyle,
+                    currentColorTheme = colorTheme,
                     onSelectThemeMode = viewModel::updateThemeMode,
                     onSelectBackgroundStyle = viewModel::updateBackgroundStyle,
+                    onSelectColorTheme = viewModel::updateColorTheme,
                     onDismiss = { viewModel.setAppearanceModalVisible(false) }
                 )
             }

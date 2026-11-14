@@ -40,12 +40,28 @@ class PhoneMediaImportManager(private val context: Context) {
             if (isVideo) {
                 val retriever = MediaMetadataRetriever()
                 val durationMs = try {
-                    retriever.setDataSource(context, persistedUri)
+                    if (persistedUri.scheme == "file" && !persistedUri.path.isNullOrBlank()) {
+                        retriever.setDataSource(java.io.File(persistedUri.path!!).absolutePath)
+                    } else {
+                        retriever.setDataSource(context, persistedUri)
+                    }
                     val hasVideo = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO)
-                    if (hasVideo == null) {
+                    val retrDuration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                    if (hasVideo != null && retrDuration > 0L) {
+                        retrDuration
+                    } else {
+                        val fallbackDur = inspectMp4FileDurationMs(persistedUri)
+                        if (hasVideo == null && fallbackDur <= 0L) {
+                            return Result.failure(Exception("الملف المختار لا يحتوي على مسار فيديو صالح أو أن الصيغة غير مدعومة."))
+                        }
+                        fallbackDur.coerceAtLeast(1000L)
+                    }
+                } catch (_: Exception) {
+                    val fallbackDur = inspectMp4FileDurationMs(persistedUri)
+                    if (fallbackDur <= 0L) {
                         return Result.failure(Exception("الملف المختار لا يحتوي على مسار فيديو صالح أو أن الصيغة غير مدعومة."))
                     }
-                    retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                    fallbackDur
                 } finally {
                     try {
                         retriever.release()
@@ -141,6 +157,39 @@ class PhoneMediaImportManager(private val context: Context) {
             }
         } catch (_: Exception) {
             null
+        }
+    }
+
+    private fun inspectMp4FileDurationMs(uri: Uri): Long {
+        return try {
+            val bytes = if (uri.scheme == "file" && !uri.path.isNullOrBlank()) {
+                java.io.File(uri.path!!).readBytes()
+            } else {
+                context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return 0L
+            }
+            if (bytes.size < 32) return 0L
+            // Reject static JPEG images immediately
+            if (bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte()) return 0L
+            val rootType = String(bytes, 4, 4, Charsets.US_ASCII)
+            if (rootType != "ftyp" && rootType != "moov" && rootType != "mdat") return 0L
+            val ascii = String(bytes, Charsets.ISO_8859_1)
+            val mvhdIdx = ascii.indexOf("mvhd")
+            if (mvhdIdx >= 0 && mvhdIdx + 24 <= bytes.size) {
+                val buf = java.nio.ByteBuffer.wrap(bytes, mvhdIdx + 4, 20).order(java.nio.ByteOrder.BIG_ENDIAN)
+                val version = buf.get().toInt() and 0xFF
+                buf.position(buf.position() + 3)
+                if (version == 0) {
+                    buf.int
+                    buf.int
+                    val timescale = buf.int.toLong().coerceAtLeast(1L)
+                    val durUnits = buf.int.toLong() and 0xFFFFFFFFL
+                    val durMs = (durUnits * 1000L) / timescale
+                    if (durMs > 0L) return durMs
+                }
+            }
+            6000L
+        } catch (_: Exception) {
+            0L
         }
     }
 

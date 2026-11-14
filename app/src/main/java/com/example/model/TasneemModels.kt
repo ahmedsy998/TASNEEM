@@ -891,7 +891,9 @@ data class ExportValidationReport(
     val fileSizeBytes: Long,
     val localFilePath: String,
     val mediaStoreUriString: String?,
-    val messageAr: String
+    val messageAr: String,
+    val videoFrameCount: Int = 0,
+    val hasChangingVideoFrames: Boolean = true
 )
 
 sealed class VideoExportState {
