@@ -243,8 +243,15 @@ class ReciterRepository {
         )
     )
 
+    val defaultReciter: ReciterInfo
+        get() = allReciters.first { it.id == DEFAULT_RECITER_ID }
+
     fun getReciterById(id: String): ReciterInfo =
-        allReciters.find { it.id == id } ?: allReciters[10] // Default: ياسر الدوسري (as in reference video)
+        allReciters.find { it.id == id } ?: defaultReciter // Default: فارس عباد (Fares Abbad)
+
+    companion object {
+        const val DEFAULT_RECITER_ID = "fares_abbad"
+    }
 
     fun resolveVerseAudioUrl(reciter: ReciterInfo, surahNumber: Int, verseNumber: Int): String? {
         for (adapter in customProviderAdapters) {

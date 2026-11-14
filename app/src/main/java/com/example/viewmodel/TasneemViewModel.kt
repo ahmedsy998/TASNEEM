@@ -13,6 +13,7 @@ import com.example.data.CuratedBackgroundMediaRepository
 import com.example.data.QuranDataRepository
 import com.example.data.QuranFontManager
 import com.example.data.ReciterRepository
+import com.example.data.StudioSettingsManager
 import com.example.data.ThemeManager
 import com.example.media.Mp4VideoRenderEngine
 import com.example.media.PhoneMediaImportManager
@@ -24,6 +25,7 @@ import com.example.model.ArabicQuranFont
 import com.example.model.AudioDownloadState
 import com.example.model.CuratedBackgroundMediaItem
 import com.example.model.CustomImportedFont
+import com.example.model.DEFAULT_PERSONAL_SIGNATURE
 import com.example.model.HeaderElementConfig
 import com.example.model.MediaCropMode
 import com.example.model.MushafBasmalaRuleMode
@@ -89,8 +91,14 @@ data class StudioUiState(
     val activeFontValidationReport: QuranFontValidationReport? = null,
     val showFontValidationModal: Boolean = false,
     val recitationHeader: RecitationHeaderConfig = RecitationHeaderConfig(),
-    val verseTransition: VerseTransitionConfig = VerseTransitionConfig(),
-    val watermark: WatermarkConfig = WatermarkConfig(),
+    val verseTransition: VerseTransitionConfig = VerseTransitionConfig(
+        effectType = TransitionEffectType.FADE_IN_OUT,
+        speedPreset = TransitionSpeedPreset.NORMAL,
+        durationMs = 360L
+    ),
+    val watermark: WatermarkConfig = WatermarkConfig(
+        signatureText = DEFAULT_PERSONAL_SIGNATURE
+    ),
     val aspectRatio: VideoAspectRatio = VideoAspectRatio.PORTRAIT_9_16,
     val resolution: VideoResolution = VideoResolution.RES_1080P,
     val exportState: VideoExportState = VideoExportState.Idle
@@ -103,6 +111,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     val quranRepository = QuranDataRepository(appContext)
     val quranFontManager = QuranFontManager(appContext)
     val reciterRepository = ReciterRepository()
+    val studioSettingsManager = StudioSettingsManager(appContext, reciterRepository, quranFontManager)
     val curatedMediaRepository = CuratedBackgroundMediaRepository(appContext)
     private val audioDownloadManager = AudioDownloadManager(appContext, reciterRepository)
     private val syncEngine = QuranSynchronizationEngine(appContext, viewModelScope)
@@ -125,16 +134,9 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     val playbackSyncState: StateFlow<PlaybackSyncState> = syncEngine.syncState
     val previewReciterId: StateFlow<String?> = syncEngine.previewReciterId
 
-    private val defaultReciter = reciterRepository.allReciters[10] // ياسر الدوسري (index 11)
-    private val initialTextStyle = quranFontManager.restorePersistedTextStyle(QuranTextStyleConfig())
-    private val initialImportedFonts = quranFontManager.getImportedFonts()
-    private val _uiState = MutableStateFlow(
-        StudioUiState(
-            selectedReciter = defaultReciter,
-            textStyle = initialTextStyle,
-            importedFonts = initialImportedFonts
-        )
-    )
+    // Initial default reciter is Fares Abbad ("فارس عباد") when no previous preference exists
+    private val defaultReciter: ReciterInfo = reciterRepository.defaultReciter
+    private val _uiState = MutableStateFlow(studioSettingsManager.restoreStudioUiState())
     val uiState: StateFlow<StudioUiState> = _uiState.asStateFlow()
 
     private var downloadJob: Job? = null
@@ -145,13 +147,32 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
         initializeDefaultCuratedBackgroundIfEmpty()
     }
 
+    /**
+     * Atomically updates [_uiState] and persists all user-customizable settings via [studioSettingsManager].
+     */
+    private fun updateAndPersistSettings(transform: (StudioUiState) -> StudioUiState) {
+        _uiState.update(transform)
+        studioSettingsManager.saveStudioSettings(_uiState.value)
+    }
+
     private fun initializeDefaultCuratedBackgroundIfEmpty() {
         viewModelScope.launch {
             if (_uiState.value.phoneMedia.uriString.isNullOrBlank()) {
                 val defaultItem = curatedMediaRepository.allItems.firstOrNull() ?: return@launch
-                val prepared = curatedMediaRepository.prepareAndCacheMediaItem(defaultItem)
+                val currentDim = _uiState.value.phoneMedia.dimLevel
+                val prepared = curatedMediaRepository.prepareAndCacheMediaItem(defaultItem, currentDim)
                 if (_uiState.value.phoneMedia.uriString.isNullOrBlank()) {
-                    _uiState.update { it.copy(phoneMedia = prepared) }
+                    updateAndPersistSettings {
+                        it.copy(
+                            phoneMedia = it.phoneMedia.copy(
+                                uriString = prepared.uriString,
+                                isVideo = prepared.isVideo,
+                                fileName = prepared.fileName,
+                                mimeType = prepared.mimeType,
+                                curatedItemId = prepared.curatedItemId
+                            )
+                        )
+                    }
                 }
             }
         }
@@ -215,7 +236,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     fun selectSurah(surah: SurahInfo) {
         syncEngine.resetPlayback()
         val defaultEnd = minOf(surah.verseCount, 10)
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(
                 selectedSurah = surah,
                 startVerse = 1,
@@ -238,7 +259,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
         if (validStart == _uiState.value.startVerse && validEnd == _uiState.value.endVerse) return
 
         syncEngine.resetPlayback()
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(
                 startVerse = validStart,
                 endVerse = validEnd,
@@ -292,19 +313,19 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     // Madinah Mushaf Settings (Section 04 — "إعدادات المصحف")
     // ==================================================
     fun updateMushafBasmalaRuleMode(mode: MushafBasmalaRuleMode) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(mushafConfig = it.mushafConfig.copy(basmalaRuleMode = mode))
         }
     }
 
     fun toggleMushafWaqfSymbols(enabled: Boolean) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(mushafConfig = it.mushafConfig.copy(showQuranicWaqfSymbols = enabled))
         }
     }
 
     fun resetMushafConfig() {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(mushafConfig = MushafEditionConfig())
         }
     }
@@ -315,7 +336,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     fun selectReciter(reciter: ReciterInfo) {
         syncEngine.stopPreview()
         syncEngine.resetPlayback()
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(
                 selectedReciter = reciter,
                 showReciterSelectorModal = false,
@@ -405,7 +426,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
         val importRes = mediaImportManager.importMediaUri(uri, isVideo, currentMedia)
         importRes.fold(
             onSuccess = { imported ->
-                _uiState.update {
+                updateAndPersistSettings {
                     it.copy(
                         phoneMedia = imported.copy(curatedItemId = null),
                         mediaImportMessageAr = if (imported.isVideo) {
@@ -432,7 +453,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
             _uiState.update { it.copy(isDownloadingCuratedMedia = true) }
             val currentDim = _uiState.value.phoneMedia.dimLevel
             val prepared = curatedMediaRepository.prepareAndCacheMediaItem(item, currentDim)
-            _uiState.update {
+            updateAndPersistSettings {
                 it.copy(
                     phoneMedia = prepared,
                     isDownloadingCuratedMedia = false,
@@ -445,11 +466,11 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateMediaCropMode(mode: MediaCropMode) {
-        _uiState.update { it.copy(phoneMedia = it.phoneMedia.copy(cropMode = mode)) }
+        updateAndPersistSettings { it.copy(phoneMedia = it.phoneMedia.copy(cropMode = mode)) }
     }
 
     fun updateMediaScale(scale: Float) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(phoneMedia = it.phoneMedia.copy(scale = scale.coerceIn(0.5f, 3.0f)))
         }
     }
@@ -459,7 +480,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateMediaOffset(offsetX: Float, offsetY: Float) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(
                 phoneMedia = it.phoneMedia.copy(
                     offsetX = offsetX.coerceIn(-1f, 1f),
@@ -474,7 +495,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateMediaBrightness(brightness: Float) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(phoneMedia = it.phoneMedia.copy(brightness = brightness.coerceIn(-0.5f, 0.5f)))
         }
     }
@@ -484,7 +505,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateMediaDimLevel(dimLevel: Float) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(phoneMedia = it.phoneMedia.copy(dimLevel = dimLevel.coerceIn(0f, 0.9f)))
         }
     }
@@ -494,7 +515,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateVideoLoopInExport(loop: Boolean) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(phoneMedia = it.phoneMedia.copy(loopVideoInExport = loop))
         }
     }
@@ -505,12 +526,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     fun updateArabicFont(font: ArabicQuranFont) {
         val report = quranFontManager.getBuiltInFontValidationReport(font)
         val autoEnableFallback = if (report.requiresFallbackForQuran) true else _uiState.value.textStyle.enableQuranicFontFallback
-        quranFontManager.saveSelectedFontPreference(
-            selectedFontId = font.id,
-            enableFallback = autoEnableFallback,
-            fallbackFont = _uiState.value.textStyle.fallbackFont
-        )
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(
                 textStyle = it.textStyle.copy(
                     font = font,
@@ -531,12 +547,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
         } else {
             _uiState.value.textStyle.enableQuranicFontFallback
         }
-        quranFontManager.saveSelectedFontPreference(
-            selectedFontId = importedFont.id,
-            enableFallback = autoEnableFallback,
-            fallbackFont = _uiState.value.textStyle.fallbackFont
-        )
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(
                 textStyle = it.textStyle.copy(
                     selectedFontId = importedFont.id,
@@ -561,12 +572,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
                 } else {
                     _uiState.value.textStyle.enableQuranicFontFallback
                 }
-                quranFontManager.saveSelectedFontPreference(
-                    selectedFontId = importRes.importedFont.id,
-                    enableFallback = autoEnableFallback,
-                    fallbackFont = _uiState.value.textStyle.fallbackFont
-                )
-                _uiState.update {
+                updateAndPersistSettings {
                     it.copy(
                         importedFonts = updatedList,
                         textStyle = it.textStyle.copy(
@@ -601,12 +607,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
             } else {
                 _uiState.value.textStyle.enableQuranicFontFallback
             }
-            quranFontManager.saveSelectedFontPreference(
-                selectedFontId = importRes.importedFont.id,
-                enableFallback = autoEnableFallback,
-                fallbackFont = _uiState.value.textStyle.fallbackFont
-            )
-            _uiState.update {
+            updateAndPersistSettings {
                 it.copy(
                     importedFonts = updatedList,
                     textStyle = it.textStyle.copy(
@@ -639,7 +640,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
         if (wasSelected) {
             val defaultFont = ArabicQuranFont.KFGQPC_UTHMANIC
             val defaultReport = quranFontManager.getBuiltInFontValidationReport(defaultFont)
-            _uiState.update {
+            updateAndPersistSettings {
                 it.copy(
                     importedFonts = updatedList,
                     textStyle = it.textStyle.copy(
@@ -654,7 +655,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
                 )
             }
         } else {
-            _uiState.update {
+            updateAndPersistSettings {
                 it.copy(
                     importedFonts = updatedList,
                     fontImportMessageAr = "تم حذف الخط المستورد بنجاح."
@@ -664,13 +665,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun toggleQuranicFontFallback(enabled: Boolean) {
-        val currentStyle = _uiState.value.textStyle
-        quranFontManager.saveSelectedFontPreference(
-            selectedFontId = currentStyle.selectedFontId,
-            enableFallback = enabled,
-            fallbackFont = currentStyle.fallbackFont
-        )
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(textStyle = it.textStyle.copy(enableQuranicFontFallback = enabled))
         }
     }
@@ -694,7 +689,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateFontSizeSp(sizeSp: Float) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(textStyle = it.textStyle.copy(fontSizeSp = sizeSp.coerceIn(16f, 46f)))
         }
     }
@@ -704,7 +699,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateLineSpacing(multiplier: Float) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(textStyle = it.textStyle.copy(lineSpacingMultiplier = multiplier.coerceIn(1.15f, 2.2f)))
         }
     }
@@ -714,7 +709,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateTextColor(colorOption: TextColorOption) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(
                 textStyle = it.textStyle.copy(
                     colorOption = colorOption,
@@ -726,7 +721,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
 
     fun updateMainTextColorHex(colorHex: Long) {
         val matchingOption = TextColorOption.entries.find { it.colorHex == colorHex } ?: _uiState.value.textStyle.colorOption
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(
                 textStyle = it.textStyle.copy(
                     colorOption = matchingOption,
@@ -741,13 +736,13 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun toggleIndependentTashkeelColor(enabled: Boolean) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(textStyle = it.textStyle.copy(enableIndependentTashkeelColor = enabled))
         }
     }
 
     fun updateTashkeelColorHex(colorHex: Long) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(
                 textStyle = it.textStyle.copy(
                     enableIndependentTashkeelColor = true,
@@ -758,7 +753,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun resetTashkeelColor() {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(
                 textStyle = it.textStyle.copy(
                     enableIndependentTashkeelColor = true,
@@ -769,7 +764,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateTextAlignment(alignment: QuranTextAlignment) {
-        _uiState.update { it.copy(textStyle = it.textStyle.copy(alignment = alignment)) }
+        updateAndPersistSettings { it.copy(textStyle = it.textStyle.copy(alignment = alignment)) }
     }
 
     fun resetTextAlignment() {
@@ -777,15 +772,15 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateTextBold(bold: Boolean) {
-        _uiState.update { it.copy(textStyle = it.textStyle.copy(isBold = bold)) }
+        updateAndPersistSettings { it.copy(textStyle = it.textStyle.copy(isBold = bold)) }
     }
 
     fun toggleSingleLineDisplay(singleLine: Boolean) {
-        _uiState.update { it.copy(textStyle = it.textStyle.copy(singleLineDisplay = singleLine)) }
+        updateAndPersistSettings { it.copy(textStyle = it.textStyle.copy(singleLineDisplay = singleLine)) }
     }
 
     fun updateTextPosition(normX: Float, normY: Float) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(
                 textStyle = it.textStyle.copy(
                     normalizedX = normX.coerceIn(0.12f, 0.88f),
@@ -804,7 +799,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
             currentHeader = state.recitationHeader,
             currentWatermark = state.watermark
         )
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(
                 textStyle = autoResult.textStyle,
                 recitationHeader = autoResult.headerConfig,
@@ -814,18 +809,18 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun toggleShowTafsir(show: Boolean) {
-        _uiState.update { it.copy(textStyle = it.textStyle.copy(showTafsir = show)) }
+        updateAndPersistSettings { it.copy(textStyle = it.textStyle.copy(showTafsir = show)) }
     }
 
     fun toggleShowTranslation(show: Boolean) {
-        _uiState.update { it.copy(textStyle = it.textStyle.copy(showTranslation = show)) }
+        updateAndPersistSettings { it.copy(textStyle = it.textStyle.copy(showTranslation = show)) }
     }
 
     // ==================================================
     // Independent Recitation Header Settings (Requirement 08 - إعدادات معلومات التلاوة)
     // ==================================================
     fun updateSurahHeaderElement(transform: (HeaderElementConfig) -> HeaderElementConfig) {
-        _uiState.update {
+        updateAndPersistSettings {
             val updated = transform(it.recitationHeader.surahName)
             it.copy(
                 recitationHeader = it.recitationHeader.copy(surahName = updated),
@@ -836,7 +831,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
 
     fun resetSurahHeaderElement() {
         val default = RecitationHeaderConfig().surahName
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(
                 recitationHeader = it.recitationHeader.copy(surahName = default),
                 textStyle = it.textStyle.copy(showSurahHeader = default.visible)
@@ -845,7 +840,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateVerseNumberHeaderElement(transform: (HeaderElementConfig) -> HeaderElementConfig) {
-        _uiState.update {
+        updateAndPersistSettings {
             val updated = transform(it.recitationHeader.verseNumber)
             it.copy(recitationHeader = it.recitationHeader.copy(verseNumber = updated))
         }
@@ -853,13 +848,13 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
 
     fun resetVerseNumberHeaderElement() {
         val default = RecitationHeaderConfig().verseNumber
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(recitationHeader = it.recitationHeader.copy(verseNumber = default))
         }
     }
 
     fun updateReciterHeaderElement(transform: (HeaderElementConfig) -> HeaderElementConfig) {
-        _uiState.update {
+        updateAndPersistSettings {
             val updated = transform(it.recitationHeader.reciterName)
             it.copy(
                 recitationHeader = it.recitationHeader.copy(reciterName = updated),
@@ -870,7 +865,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
 
     fun resetReciterHeaderElement() {
         val default = RecitationHeaderConfig().reciterName
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(
                 recitationHeader = it.recitationHeader.copy(reciterName = default),
                 textStyle = it.textStyle.copy(showReciterName = default.visible)
@@ -888,56 +883,22 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // ==================================================
-    // Transition Effects Between Verses & Phrases (Requirement 06)
-    // ==================================================
-    fun updateTransitionEffect(effect: TransitionEffectType) {
-        _uiState.update {
-            it.copy(verseTransition = it.verseTransition.copy(effectType = effect))
-        }
-    }
-
-    fun updateTransitionSpeedPreset(preset: TransitionSpeedPreset) {
-        _uiState.update {
-            it.copy(
-                verseTransition = it.verseTransition.copy(
-                    speedPreset = preset,
-                    durationMs = preset.durationMs
-                )
-            )
-        }
-    }
-
-    fun updateTransitionDurationMs(durationMs: Long) {
-        _uiState.update {
-            it.copy(
-                verseTransition = it.verseTransition.copy(
-                    durationMs = durationMs.coerceIn(80L, 1000L)
-                )
-            )
-        }
-    }
-
-    fun resetTransitionSettings() {
-        _uiState.update { it.copy(verseTransition = VerseTransitionConfig()) }
-    }
-
-    // ==================================================
     // Personal Signature ("التوقيع الشخصي") & Social Media Icons (Requirement 10)
     // ==================================================
     fun toggleWatermarkEnabled(enabled: Boolean) {
-        _uiState.update { it.copy(watermark = it.watermark.copy(enabled = enabled)) }
+        updateAndPersistSettings { it.copy(watermark = it.watermark.copy(enabled = enabled)) }
     }
 
     fun updateSignatureText(text: String) {
-        _uiState.update { it.copy(watermark = it.watermark.copy(signatureText = text.take(40))) }
+        updateAndPersistSettings { it.copy(watermark = it.watermark.copy(signatureText = text.take(40))) }
     }
 
     fun resetSignatureText() {
-        updateSignatureText("تسنيم")
+        updateSignatureText(DEFAULT_PERSONAL_SIGNATURE)
     }
 
     fun updateSignatureFont(font: ArabicQuranFont) {
-        _uiState.update { it.copy(watermark = it.watermark.copy(font = font)) }
+        updateAndPersistSettings { it.copy(watermark = it.watermark.copy(font = font)) }
     }
 
     fun resetSignatureFont() {
@@ -945,7 +906,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateSignatureColorHex(colorHex: Long) {
-        _uiState.update { it.copy(watermark = it.watermark.copy(colorHex = colorHex)) }
+        updateAndPersistSettings { it.copy(watermark = it.watermark.copy(colorHex = colorHex)) }
     }
 
     fun resetSignatureColor() {
@@ -953,7 +914,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun applyWatermarkPreset(preset: WatermarkPresetPosition) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(
                 watermark = it.watermark.copy(
                     normalizedX = preset.normX,
@@ -964,7 +925,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateWatermarkPosition(normX: Float, normY: Float) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(
                 watermark = it.watermark.copy(
                     normalizedX = normX.coerceIn(0.08f, 0.92f),
@@ -979,7 +940,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateWatermarkFontSize(sizeSp: Float) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(watermark = it.watermark.copy(fontSizeSp = sizeSp.coerceIn(11f, 28f)))
         }
     }
@@ -989,7 +950,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateWatermarkScale(scale: Float) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(watermark = it.watermark.copy(scale = scale.coerceIn(0.6f, 1.8f)))
         }
     }
@@ -999,7 +960,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateWatermarkOpacity(opacity: Float) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(watermark = it.watermark.copy(opacity = opacity.coerceIn(0.2f, 1.0f)))
         }
     }
@@ -1009,7 +970,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateWatermarkMargin(marginDp: Float) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(watermark = it.watermark.copy(marginDp = marginDp.coerceIn(8f, 48f)))
         }
     }
@@ -1019,15 +980,15 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun toggleWatermarkShadow(enabled: Boolean) {
-        _uiState.update { it.copy(watermark = it.watermark.copy(subtleShadow = enabled)) }
+        updateAndPersistSettings { it.copy(watermark = it.watermark.copy(subtleShadow = enabled)) }
     }
 
     fun toggleWatermarkGlow(enabled: Boolean) {
-        _uiState.update { it.copy(watermark = it.watermark.copy(elegantGlow = enabled)) }
+        updateAndPersistSettings { it.copy(watermark = it.watermark.copy(elegantGlow = enabled)) }
     }
 
     fun toggleSocialPlatform(platform: SocialPlatform) {
-        _uiState.update {
+        updateAndPersistSettings {
             val current = it.watermark.selectedSocialPlatforms.toMutableSet()
             if (platform in current) {
                 current.remove(platform)
@@ -1039,7 +1000,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateSocialIconsSizeDp(sizeDp: Float) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(watermark = it.watermark.copy(socialIconsSizeDp = sizeDp.coerceIn(12f, 34f)))
         }
     }
@@ -1049,13 +1010,13 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateSocialIconsOffsetY(offsetY: Float) {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(watermark = it.watermark.copy(socialIconsOffsetY = offsetY.coerceIn(-0.5f, 0.5f)))
         }
     }
 
     fun resetSocialIconsSettings() {
-        _uiState.update {
+        updateAndPersistSettings {
             it.copy(
                 watermark = it.watermark.copy(
                     selectedSocialPlatforms = emptySet(),
@@ -1070,7 +1031,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     // Aspect Ratio, Resolution & Complete MP4 Video Export
     // ==================================================
     fun updateAspectRatio(ratio: VideoAspectRatio) {
-        _uiState.update { current ->
+        updateAndPersistSettings { current ->
             if (current.textStyle.isAutoPositioned) {
                 val auto = QuranTextAndLayoutEngine.computeAutoLayout(
                     aspectRatio = ratio,
@@ -1096,7 +1057,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateVideoResolution(resolution: VideoResolution) {
-        _uiState.update { it.copy(resolution = resolution, exportState = VideoExportState.Idle) }
+        updateAndPersistSettings { it.copy(resolution = resolution, exportState = VideoExportState.Idle) }
     }
 
     fun resetVideoResolution() {
@@ -1128,11 +1089,18 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
             val activeMedia = if (state.phoneMedia.uriString.isNullOrBlank()) {
                 val fallbackItem = curatedMediaRepository.allItems.first()
                 val prepared = curatedMediaRepository.prepareAndCacheMediaItem(fallbackItem, state.phoneMedia.dimLevel)
-                _uiState.update { it.copy(phoneMedia = prepared) }
+                updateAndPersistSettings { it.copy(phoneMedia = prepared) }
                 prepared
             } else {
                 state.phoneMedia
             }
+
+            // Always render with smooth Fade In / Fade Out transition (Requirement 2)
+            val automaticFadeTransition = VerseTransitionConfig(
+                effectType = TransitionEffectType.FADE_IN_OUT,
+                speedPreset = TransitionSpeedPreset.NORMAL,
+                durationMs = 360L
+            )
 
             mp4RenderEngine.renderCompleteMp4Video(
                 surahNameAr = state.selectedSurah.nameAr,
@@ -1142,7 +1110,7 @@ class TasneemViewModel(application: Application) : AndroidViewModel(application)
                 mediaBackground = activeMedia,
                 textStyleConfig = state.textStyle,
                 headerConfig = state.recitationHeader,
-                transitionConfig = state.verseTransition,
+                transitionConfig = automaticFadeTransition,
                 watermarkConfig = state.watermark,
                 resolution = state.resolution,
                 aspectRatio = state.aspectRatio

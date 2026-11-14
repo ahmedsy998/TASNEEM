@@ -632,7 +632,7 @@ class VideoFrameCanvasRenderer(private val context: Context) {
             color = Color.argb(alphaInt, 232, 135, 47) // Tasneem Orange #E8872F
         }
 
-        val label = watermarkConfig.signatureText.ifBlank { "تسنيم" }
+        val label = watermarkConfig.signatureText.ifBlank { com.example.model.DEFAULT_PERSONAL_SIGNATURE }
         val textWidth = wmPaint.measureText(label)
         val pillWidth = textWidth + 56f * scaleFactor
         val pillHeight = wmTextSize * 1.62f

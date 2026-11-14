@@ -79,15 +79,13 @@ import com.example.model.ArabicFontCategory
 import com.example.model.ArabicQuranFont
 import com.example.model.AudioDownloadState
 import com.example.model.CustomImportedFont
+import com.example.model.DEFAULT_PERSONAL_SIGNATURE
 import com.example.model.FontQuranCompatibilityLevel
 import com.example.model.QuranTextAlignment
 import com.example.model.QuranTextStyleConfig
 import com.example.model.SocialPlatform
 import com.example.model.SurahInfo
 import com.example.model.TextColorOption
-import com.example.model.TransitionEffectType
-import com.example.model.TransitionSpeedPreset
-import com.example.model.VerseTransitionConfig
 import com.example.model.VideoAspectRatio
 import com.example.model.VideoExportState
 import com.example.model.VideoResolution
@@ -1263,142 +1261,6 @@ fun VersePositionAndSizeCollapsibleGroup(
 }
 
 /**
- * Group 8: Transition Effects Between Verses & Phrases ("تأثيرات الانتقال") - Requirement 06.
- */
-@Composable
-fun TransitionEffectsCollapsibleGroup(
-    expanded: Boolean,
-    onToggleExpanded: () -> Unit,
-    transitionConfig: VerseTransitionConfig,
-    onSelectEffect: (TransitionEffectType) -> Unit,
-    onSelectSpeedPreset: (TransitionSpeedPreset) -> Unit,
-    onUpdateDurationMs: (Long) -> Unit,
-    onResetTransitions: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val colors = LocalTasneemColors.current
-
-    CollapsibleStudioGroupCard(
-        groupNumberAr = "٨",
-        titleAr = "تأثيرات الانتقال",
-        subtitleAr = "${transitionConfig.effectType.titleAr} · ${transitionConfig.durationMs} مللي ثانية",
-        expanded = expanded,
-        onToggleExpanded = onToggleExpanded,
-        onResetGroup = onResetTransitions,
-        testTag = "collapsible_group_transitions",
-        modifier = modifier
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "نوع تأثير الانتقال بين الآيات والمقاطع (٧ تأثيرات)",
-                style = MaterialTheme.typography.labelLarge,
-                color = colors.textSecondary
-            )
-            SettingResetIconButton(
-                contentDescription = "إعادة ضبط تأثيرات الانتقال",
-                onReset = onResetTransitions,
-                testTag = "reset_transitions_button"
-            )
-        }
-
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            TransitionEffectType.entries.forEach { effect ->
-                val isSelected = transitionConfig.effectType == effect
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = colors.elevatedSurface,
-                    border = BorderStroke(
-                        width = if (isSelected) 2.dp else 1.dp,
-                        color = if (isSelected) TasneemOrange else colors.borderSubtle
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { onSelectEffect(effect) }
-                        .testTag("transition_effect_${effect.id}")
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = effect.titleAr,
-                                style = MaterialTheme.typography.titleSmall,
-                                color = if (isSelected) TasneemOrange else colors.textPrimary
-                            )
-                            Text(
-                                text = effect.subtitleAr,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = colors.textSecondary
-                            )
-                        }
-                        if (isSelected) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = "مختار",
-                                tint = TasneemOrange,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // Transition Speed Presets
-        Text(
-            text = "سرعة الانتقال",
-            style = MaterialTheme.typography.labelLarge,
-            color = colors.textSecondary
-        )
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            TransitionSpeedPreset.entries.forEach { preset ->
-                val isSelected = transitionConfig.speedPreset == preset &&
-                    transitionConfig.durationMs == preset.durationMs
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = if (isSelected) TasneemOrange else colors.elevatedSurface,
-                    border = BorderStroke(1.dp, if (isSelected) TasneemOrange else colors.borderSubtle),
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onSelectSpeedPreset(preset) }
-                ) {
-                    Text(
-                        text = "${preset.labelAr} (${preset.durationMs}ms)",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (isSelected) TasneemDeepCharcoal else colors.textPrimary,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
-                    )
-                }
-            }
-        }
-
-        // Exact Transition Duration Slider
-        LabeledSliderControl(
-            label = "مدة تأثير الانتقال (مللي ثانية)",
-            valueText = "${transitionConfig.durationMs} ms",
-            value = transitionConfig.durationMs.toFloat(),
-            valueRange = 80f..1000f,
-            onValueChange = { onUpdateDurationMs(it.toLong()) },
-            onReset = { onUpdateDurationMs(TransitionSpeedPreset.NORMAL.durationMs) }
-        )
-    }
-}
-
-/**
  * Group 10: Personal Signature and Watermark ("التوقيع الشخصي والعلامة المائية") - Requirement 10.
  */
 @OptIn(ExperimentalLayoutApi::class)
@@ -1433,7 +1295,7 @@ fun PersonalSignatureCollapsibleGroup(
     CollapsibleStudioGroupCard(
         groupNumberAr = "١٠",
         titleAr = "التوقيع الشخصي والعلامة المائية",
-        subtitleAr = if (watermark.enabled) "التوقيع الحالي: «${watermark.signatureText.ifBlank { "تسنيم" }}»"
+        subtitleAr = if (watermark.enabled) "التوقيع الحالي: «${watermark.signatureText.ifBlank { DEFAULT_PERSONAL_SIGNATURE }}»"
         else "التوقيع الشخصي مخفي",
         expanded = expanded,
         onToggleExpanded = onToggleExpanded,
@@ -1473,19 +1335,19 @@ fun PersonalSignatureCollapsibleGroup(
         }
 
         if (watermark.enabled) {
-            // Custom Signature Text Input (default "تسنيم")
+            // Custom Signature Text Input (default "rattil.official.2026")
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "نص التوقيع الشخصي (الافتراضي: تسنيم)",
+                    text = "نص التوقيع الشخصي (الافتراضي: $DEFAULT_PERSONAL_SIGNATURE)",
                     style = MaterialTheme.typography.labelLarge,
                     color = colors.textSecondary
                 )
                 SettingResetIconButton(
-                    contentDescription = "إعادة ضبط نص التوقيع إلى تسنيم",
+                    contentDescription = "إعادة ضبط نص التوقيع إلى $DEFAULT_PERSONAL_SIGNATURE",
                     onReset = onResetSignatureText,
                     testTag = "reset_signature_text_button"
                 )
@@ -1494,7 +1356,7 @@ fun PersonalSignatureCollapsibleGroup(
             OutlinedTextField(
                 value = watermark.signatureText,
                 onValueChange = onUpdateSignatureText,
-                placeholder = { Text("تسنيم") },
+                placeholder = { Text(DEFAULT_PERSONAL_SIGNATURE) },
                 singleLine = true,
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -1517,7 +1379,7 @@ fun PersonalSignatureCollapsibleGroup(
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                listOf("تسنيم", "صدقة جارية", "قناة القرآن الكريم", "تلاوات خاشعة").forEach { suggestion ->
+                listOf(DEFAULT_PERSONAL_SIGNATURE, "تسنيم", "صدقة جارية", "قناة القرآن الكريم", "تلاوات خاشعة").forEach { suggestion ->
                     Surface(
                         shape = RoundedCornerShape(50),
                         color = colors.elevatedSurface,

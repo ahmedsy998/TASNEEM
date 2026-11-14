@@ -51,7 +51,6 @@ import com.example.ui.components.ReciterAndRecitationCollapsibleGroup
 import com.example.ui.components.SocialMediaIconsCollapsibleGroup
 import com.example.ui.components.SurahAndVerseSelectionCollapsibleGroup
 import com.example.ui.components.TextAndTashkeelColorsCollapsibleGroup
-import com.example.ui.components.TransitionEffectsCollapsibleGroup
 import com.example.ui.components.VersePositionAndSizeCollapsibleGroup
 import com.example.ui.components.VideoQualityAndExportCollapsibleGroup
 import com.example.ui.theme.LocalTasneemColors
@@ -111,6 +110,7 @@ fun TasneemStudioScreen(
     }
 
     // Collapsible Studio Groups (including dedicated Madinah Mushaf group 0)
+    val studioGroupIds = remember { listOf(0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12) }
     val expandedGroups = remember {
         mutableStateMapOf(
             0 to false, // إعدادات المصحف (مصحف المدينة النبوية — رواية حفص عن عاصم)
@@ -121,7 +121,6 @@ fun TasneemStudioScreen(
             5 to false, // النص القرآني
             6 to false, // ألوان النص والتشكيل
             7 to false, // موضع وحجم الآيات
-            8 to false, // تأثيرات الانتقال
             9 to false, // الخلفيات والصور والفيديوهات
             10 to false,// التوقيع الشخصي والعلامة المائية
             11 to false,// أيقونات التواصل الاجتماعي
@@ -195,7 +194,7 @@ fun TasneemStudioScreen(
                         style = MaterialTheme.typography.labelLarge,
                         color = colors.textSecondary
                     )
-                    val allExpanded = (0..12).all { expandedGroups[it] == true }
+                    val allExpanded = studioGroupIds.all { expandedGroups[it] == true }
                     Surface(
                         shape = RoundedCornerShape(50),
                         color = colors.elevatedSurface,
@@ -204,7 +203,7 @@ fun TasneemStudioScreen(
                             .clip(RoundedCornerShape(50))
                             .clickable {
                                 val target = !allExpanded
-                                for (i in 0..12) expandedGroups[i] = target
+                                for (i in studioGroupIds) expandedGroups[i] = target
                             }
                             .testTag("toggle_all_collapsible_groups_button")
                     ) {
@@ -341,17 +340,6 @@ fun TasneemStudioScreen(
                     textStyle = uiState.textStyle,
                     onUpdateTextPosition = viewModel::updateTextPosition,
                     onRestoreAutoPositioning = viewModel::restoreAutomaticPositioning
-                )
-
-                // Group 8: تأثيرات الانتقال (Transition Effects)
-                TransitionEffectsCollapsibleGroup(
-                    expanded = isGroupExpanded(8),
-                    onToggleExpanded = { toggleGroup(8) },
-                    transitionConfig = uiState.verseTransition,
-                    onSelectEffect = viewModel::updateTransitionEffect,
-                    onSelectSpeedPreset = viewModel::updateTransitionSpeedPreset,
-                    onUpdateDurationMs = viewModel::updateTransitionDurationMs,
-                    onResetTransitions = viewModel::resetTransitionSettings
                 )
 
                 // Group 9: الخلفيات والصور والفيديوهات (Background Media Library)

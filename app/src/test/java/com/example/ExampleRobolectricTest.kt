@@ -30,6 +30,8 @@ import com.example.model.SocialPlatform
 import com.example.model.TransitionEffectType
 import com.example.model.VerseAudioSegment
 import com.example.model.VerseTransitionConfig
+import com.example.model.VideoAspectRatio
+import com.example.model.VideoResolution
 import com.example.model.WatermarkConfig
 import com.example.model.WordTiming
 import kotlinx.coroutines.runBlocking
@@ -491,6 +493,121 @@ class ExampleRobolectricTest {
         val curatedRepo = CuratedBackgroundMediaRepository(context)
         assertEquals(30, curatedRepo.getItems(isVideo = false).size)
         assertEquals(15, curatedRepo.getItems(isVideo = true).size)
+    }
+
+    @Test
+    fun `PERSISTENT SETTINGS & DEFAULTS - Fares Abbad default reciter, rattil_official_2026 default signature, automatic Fade In Out, and full settings persistence across restart`() {
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        val reciterRepo = ReciterRepository()
+        val fontManager = QuranFontManager(app)
+        val settingsManager = com.example.data.StudioSettingsManager(app, reciterRepo, fontManager)
+
+        // 1. Clear saved settings to simulate a fresh installation
+        settingsManager.clearAllSavedSettingsForTesting()
+
+        // Verify all 20 reciters remain available and Fares Abbad ("فارس عباد") is the initial default reciter
+        assertEquals(20, reciterRepo.allReciters.size)
+        assertEquals("fares_abbad", reciterRepo.defaultReciter.id)
+        assertEquals("فارس عباد", reciterRepo.defaultReciter.nameAr)
+
+        val freshState = settingsManager.restoreStudioUiState()
+        assertEquals("fares_abbad", freshState.selectedReciter.id)
+        assertEquals("فارس عباد", freshState.selectedReciter.nameAr)
+        assertEquals("rattil.official.2026", freshState.watermark.signatureText)
+        assertEquals(TransitionEffectType.FADE_IN_OUT, freshState.verseTransition.effectType)
+
+        // 2. Customize all user settings via TasneemViewModel and verify automatic persistence
+        val vm1 = com.example.viewmodel.TasneemViewModel(app)
+        assertEquals("فارس عباد", vm1.uiState.value.selectedReciter.nameAr)
+        assertEquals("rattil.official.2026", vm1.uiState.value.watermark.signatureText)
+        assertEquals(TransitionEffectType.FADE_IN_OUT, vm1.uiState.value.verseTransition.effectType)
+
+        // Select another reciter (e.g., Mishary Al-Afasy)
+        val customReciter = reciterRepo.getReciterById("al_afasy")
+        vm1.selectReciter(customReciter)
+
+        // Import & select a custom font
+        val amiriQuranFile = ArabicQuranFont.AMIRI_QURAN.resolveBundledFontFile(app)!!
+        val customFontTemp = File(app.cacheDir, "PersistedCustomFont.ttf").apply {
+            writeBytes(amiriQuranFile.readBytes())
+        }
+        val importedFont = vm1.importCustomFontFromFile(customFontTemp, "PersistedCustomFont.ttf").getOrThrow()
+
+        // Customize font size, main text color, Tashkeel color, and text position
+        vm1.updateFontSizeSp(34f)
+        vm1.updateMainTextColorHex(0xFFF5F1EA)
+        vm1.updateTashkeelColorHex(0xFFF3B35A)
+        vm1.updateTextPosition(0.44f, 0.52f)
+
+        // Customize recitation header settings
+        vm1.updateSurahHeaderElement { it.copy(fontSizeSp = 25f, colorHex = 0xFFE8872F) }
+
+        // Customize background media selection & adjustments via ViewModel
+        val bgFile = File(app.filesDir, "persisted_test_bg.png")
+        val testBmp = Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888)
+        bgFile.outputStream().use { out ->
+            testBmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+        }
+        vm1.onPhoneMediaPicked(android.net.Uri.fromFile(bgFile), isVideo = false)
+        vm1.updateMediaDimLevel(0.68f)
+        vm1.updateMediaScale(1.25f)
+
+        // Customize personal signature & social media icons
+        vm1.updateSignatureText("my.custom.signature.2026")
+        vm1.toggleSocialPlatform(SocialPlatform.INSTAGRAM)
+        vm1.toggleSocialPlatform(SocialPlatform.YOUTUBE)
+        vm1.updateSocialIconsSizeDp(24f)
+
+        // Customize aspect ratio and resolution
+        vm1.updateAspectRatio(VideoAspectRatio.LANDSCAPE_16_9)
+        vm1.updateVideoResolution(VideoResolution.RES_720P)
+
+        // 3. Simulate application closure and device restart by creating a brand-new StudioSettingsManager & ViewModel
+        val restartedSettingsManager = com.example.data.StudioSettingsManager(app, ReciterRepository(), QuranFontManager(app))
+        val restoredState = restartedSettingsManager.restoreStudioUiState()
+
+        // Verify previously saved reciter is preserved (NOT reset to Fares Abbad)
+        assertEquals("al_afasy", restoredState.selectedReciter.id)
+        assertEquals("مشاري العفاسي", restoredState.selectedReciter.nameAr)
+
+        // Verify imported font & typography settings survived restart
+        assertTrue(restoredState.importedFonts.any { it.id == importedFont.id })
+        assertEquals(importedFont.id, restoredState.textStyle.selectedFontId)
+        assertEquals(34f, restoredState.textStyle.fontSizeSp, 0.01f)
+        assertEquals(0xFFF5F1EA, restoredState.textStyle.mainTextColorHex)
+        assertEquals(0xFFF3B35A, restoredState.textStyle.tashkeelColorHex)
+        assertEquals(0.44f, restoredState.textStyle.normalizedX, 0.01f)
+        assertEquals(0.52f, restoredState.textStyle.normalizedY, 0.01f)
+
+        // Verify header settings survived restart
+        assertEquals(25f, restoredState.recitationHeader.surahName.fontSizeSp, 0.01f)
+        assertEquals(0xFFE8872F, restoredState.recitationHeader.surahName.colorHex)
+
+        // Verify background media survived restart
+        assertEquals(android.net.Uri.fromFile(bgFile).toString(), restoredState.phoneMedia.uriString)
+        assertEquals(0.68f, restoredState.phoneMedia.dimLevel, 0.01f)
+        assertEquals(1.25f, restoredState.phoneMedia.scale, 0.01f)
+
+        // Verify customized signature & social media icons survived restart (NOT overwritten by default signature)
+        assertEquals("my.custom.signature.2026", restoredState.watermark.signatureText)
+        assertTrue(SocialPlatform.INSTAGRAM in restoredState.watermark.selectedSocialPlatforms)
+        assertTrue(SocialPlatform.YOUTUBE in restoredState.watermark.selectedSocialPlatforms)
+        assertEquals(24f, restoredState.watermark.socialIconsSizeDp, 0.01f)
+
+        // Verify aspect ratio & resolution survived restart
+        assertEquals(VideoAspectRatio.LANDSCAPE_16_9, restoredState.aspectRatio)
+        assertEquals(VideoResolution.RES_720P, restoredState.resolution)
+
+        // Verify Fade In / Fade Out transition is active automatically
+        assertEquals(TransitionEffectType.FADE_IN_OUT, restoredState.verseTransition.effectType)
+        val fadeEnterState = QuranTextAndLayoutEngine.computeTransitionFrameState(
+            transitionConfig = restoredState.verseTransition,
+            localPhraseTimeMs = 90L,
+            phraseDurationMs = 3000L,
+            totalWordsInPhrase = 5,
+            hasPreviousSlice = false
+        )
+        assertTrue("Fade In must smoothly ramp alpha between 0 and 1", fadeEnterState.mainAlpha in 0.05f..0.99f)
     }
 
     /**

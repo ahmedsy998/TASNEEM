@@ -32,12 +32,15 @@ class PhoneMediaImportManager(private val context: Context) {
 
             val mimeType = contentResolver.getType(uri)?.lowercase() ?: ""
             val fileName = resolveDisplayName(uri)
-
             val isVideo = expectedVideo || mimeType.startsWith("video/")
+
+            // Persist a local copy in private app storage so Photo Picker / temporary URIs survive app & device restart
+            val persistedUri = persistMediaToInternalStorage(uri, fileName, isVideo) ?: uri
+
             if (isVideo) {
                 val retriever = MediaMetadataRetriever()
                 val durationMs = try {
-                    retriever.setDataSource(context, uri)
+                    retriever.setDataSource(context, persistedUri)
                     val hasVideo = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO)
                     if (hasVideo == null) {
                         return Result.failure(Exception("الملف المختار لا يحتوي على مسار فيديو صالح أو أن الصيغة غير مدعومة."))
@@ -52,7 +55,7 @@ class PhoneMediaImportManager(private val context: Context) {
 
                 Result.success(
                     previousSettings.copy(
-                        uriString = uri.toString(),
+                        uriString = persistedUri.toString(),
                         isVideo = true,
                         fileName = fileName.ifBlank { "فيديو من الهاتف.mp4" },
                         mimeType = mimeType.ifBlank { "video/mp4" },
@@ -60,13 +63,14 @@ class PhoneMediaImportManager(private val context: Context) {
                         cropMode = MediaCropMode.CENTER_CROP,
                         scale = 1.0f,
                         offsetX = 0f,
-                        offsetY = 0f
+                        offsetY = 0f,
+                        curatedItemId = null
                     )
                 )
             } else {
                 // Validate image decoding
                 val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                contentResolver.openInputStream(uri)?.use { stream ->
+                contentResolver.openInputStream(persistedUri)?.use { stream ->
                     BitmapFactory.decodeStream(stream, null, options)
                 }
                 if (options.outWidth <= 0 || options.outHeight <= 0) {
@@ -75,7 +79,7 @@ class PhoneMediaImportManager(private val context: Context) {
 
                 Result.success(
                     previousSettings.copy(
-                        uriString = uri.toString(),
+                        uriString = persistedUri.toString(),
                         isVideo = false,
                         fileName = fileName.ifBlank { "صورة من الهاتف" },
                         mimeType = mimeType.ifBlank { "image/jpeg" },
@@ -83,12 +87,33 @@ class PhoneMediaImportManager(private val context: Context) {
                         cropMode = MediaCropMode.CENTER_CROP,
                         scale = 1.0f,
                         offsetX = 0f,
-                        offsetY = 0f
+                        offsetY = 0f,
+                        curatedItemId = null
                     )
                 )
             }
         } catch (e: Exception) {
             Result.failure(Exception("حدث خطأ أثناء استيراد الوسائط من الهاتف: ${e.localizedMessage ?: "ملف غير مدعوم"}"))
+        }
+    }
+
+    private fun persistMediaToInternalStorage(uri: Uri, originalName: String, isVideo: Boolean): Uri? {
+        return try {
+            if (uri.scheme == "file") return uri
+            val dir = java.io.File(context.filesDir, "persisted_backgrounds").apply { mkdirs() }
+            val ext = originalName.substringAfterLast('.', "").lowercase().takeIf { it.length in 2..4 }
+                ?: if (isVideo) "mp4" else "jpg"
+            val targetFile = java.io.File(dir, if (isVideo) "active_background_video.$ext" else "active_background_image.$ext")
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                targetFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            if (targetFile.exists() && targetFile.length() > 0L) {
+                Uri.fromFile(targetFile)
+            } else null
+        } catch (_: Exception) {
+            null
         }
     }
 

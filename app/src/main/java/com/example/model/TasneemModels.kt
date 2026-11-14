@@ -699,10 +699,12 @@ enum class TransitionSpeedPreset(
 }
 
 data class VerseTransitionConfig(
-    val effectType: TransitionEffectType = TransitionEffectType.ELEGANT_CROSSFADE,
+    val effectType: TransitionEffectType = TransitionEffectType.FADE_IN_OUT,
     val speedPreset: TransitionSpeedPreset = TransitionSpeedPreset.NORMAL,
     val durationMs: Long = 360L
 )
+
+const val DEFAULT_PERSONAL_SIGNATURE = "rattil.official.2026"
 
 /**
  * Social Media Platforms for Personal Signature (Requirement 10)
@@ -732,7 +734,7 @@ enum class WatermarkPresetPosition(
 
 data class WatermarkConfig(
     val enabled: Boolean = true,
-    val signatureText: String = "تسنيم",
+    val signatureText: String = DEFAULT_PERSONAL_SIGNATURE,
     val font: ArabicQuranFont = ArabicQuranFont.CAIRO,
     val colorHex: Long = 0xFFF5F1EA,
     val alignment: QuranTextAlignment = QuranTextAlignment.CENTER,
